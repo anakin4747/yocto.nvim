@@ -19,3 +19,7 @@ live until neovim exits.
 Fix bash-language-server hover text like vscode-bitbake does
 (client/src/language/middlewareHover.ts:69-94): resolve relative .bbclass
 paths and correct "defined on line N" to the recipe's line numbers.
+
+---
+
+python functions defined in classes do not work for go to definition
