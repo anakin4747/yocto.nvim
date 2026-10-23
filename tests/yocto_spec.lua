@@ -137,6 +137,12 @@ describe("embedded language docs handler", function()
         assert.are.equal(0, vim.fn.isdirectory(dir))
     end)
 
+    it("accepts docs wrapped in positional params as sent by the server", function()
+        docs.handler(nil, { { doc("bash", "echo hi"), doc("python", "x = 1") } }, {})
+        assert.are.equal("echo hi", read(docs.get_embedded_uri(ORIG, "bash")))
+        assert.are.equal("x = 1", read(docs.get_embedded_uri(ORIG, "python")))
+    end)
+
     it("ignores unknown languages", function()
         docs.handler(nil, { doc("perl", "print 1") }, {})
         assert.is_nil(docs.get_embedded_uri(ORIG, "perl"))

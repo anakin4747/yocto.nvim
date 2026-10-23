@@ -51,6 +51,10 @@ function M.handler(err, result, _ctx)
     if err or type(result) ~= "table" then
         return
     end
+    -- The server sends the doc array as a single positional parameter.
+    if vim.islist(result[1]) then
+        result = result[1]
+    end
     for _, doc in ipairs(result) do
         save(doc)
     end
