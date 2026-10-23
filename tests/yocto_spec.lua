@@ -153,11 +153,19 @@ end)
 
 local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
 
--- In-process fake language server. Records notifications into `messages`.
-local function fake_cmd(messages)
-    local capabilities = { textDocumentSync = { openClose = true, change = 1 } }
+-- In-process fake language server. Records requests and notifications into
+-- `messages`. `opts.handlers[method](params)` answers requests and
+-- `opts.capabilities` extends the advertised capabilities.
+local function fake_cmd(messages, opts)
+    opts = opts or {}
+    local capabilities = vim.tbl_extend(
+        "force",
+        { textDocumentSync = { openClose = true, change = 1 } },
+        opts.capabilities or {}
+    )
     return function(dispatchers)
         local closing = false
+        local next_id = 0
         local function close()
             if not closing then
                 closing = true
@@ -167,11 +175,25 @@ local function fake_cmd(messages)
             end
         end
         return {
-            request = function(method, _params, callback)
+            request = function(method, params, callback, notify_reply_callback)
+                next_id = next_id + 1
+                local id = next_id
+                if messages then
+                    table.insert(messages, { method = method, params = params })
+                end
                 vim.schedule(function()
-                    callback(nil, method == "initialize" and { capabilities = capabilities } or nil)
+                    local result
+                    if method == "initialize" then
+                        result = { capabilities = capabilities }
+                    elseif opts.handlers and opts.handlers[method] then
+                        result = opts.handlers[method](params)
+                    end
+                    callback(nil, result)
+                    if notify_reply_callback then
+                        notify_reply_callback(id)
+                    end
                 end)
-                return true, 1
+                return true, id
             end,
             notify = function(method, params)
                 if messages then
@@ -194,7 +216,7 @@ end
 -- still initializing are hidden from get_clients() and vim.lsp.enable(false)
 -- unless _uninitialized is passed; they would otherwise be reused later.
 local function stop_servers()
-    vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
+    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", unpack(DEFAULT_NAMES) }, false)
     for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
         client:stop(true)
     end
