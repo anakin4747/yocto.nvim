@@ -653,6 +653,85 @@ describe("embedded proxy client", function()
         vim.api.nvim_buf_delete(recipe_buf, { force = true })
     end)
 
+    -- Fake bitbake server reporting `language` everywhere, fake python server
+    -- answering hover with `hover`, and the do_foo fixture as embedded doc.
+    local function start_servers(opts)
+        local python_messages = {}
+        vim.lsp.config("user_bitbake", {
+            cmd = fake_cmd(nil, {
+                handlers = {
+                    ["bitbake/requestEmbeddedLanguageDocInfos"] = function()
+                        return opts.language
+                    end,
+                },
+            }),
+            filetypes = { "bitbake" },
+        })
+        vim.lsp.enable("user_bitbake")
+        if opts.python ~= false then
+            vim.lsp.config("user_python", {
+                cmd = fake_cmd(python_messages, {
+                    capabilities = { hoverProvider = true },
+                    handlers = {
+                        ["textDocument/hover"] = function()
+                            return opts.hover
+                        end,
+                    },
+                }),
+                filetypes = { "python" },
+            })
+            vim.lsp.enable("user_python")
+        end
+
+        vim.bo[recipe_buf].filetype = "bitbake"
+        yocto.handler(nil, { doc("python", table.concat(EMBEDDED, "\n"), INDEXES) }, {})
+        local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(ORIG, "python")))
+        vim.wait(1000, function()
+            return proxy_client() ~= nil
+                and #vim.lsp.get_clients({ bufnr = recipe_buf, name = "user_bitbake" }) == 1
+                and (opts.python == false
+                    or #vim.lsp.get_clients({ bufnr = embedded_buf, name = "user_python" }) == 1)
+        end)
+        return python_messages
+    end
+
+    local function hover(position)
+        local response = proxy_client():request_sync(
+            "textDocument/hover",
+            { textDocument = { uri = ORIG }, position = position },
+            1000,
+            recipe_buf
+        )
+        return response and response.result
+    end
+
+    local function requests_for(messages, method)
+        return vim.tbl_filter(function(m)
+            return m.method == method
+        end, messages)
+    end
+
+    it("advertises hover support", function()
+        start_servers({ language = "python" })
+        assert.is_true(proxy_client():supports_method("textDocument/hover"))
+    end)
+
+    it("forwards hover to the embedded server at the mapped position", function()
+        local messages = start_servers({ language = "python", hover = { contents = "doc" } })
+        hover(pos(0, 7))
+        local requests = requests_for(messages, "textDocument/hover")
+        assert.are.equal(1, #requests)
+        assert.are.same({
+            textDocument = { uri = yocto.get_embedded_uri(ORIG, "python") },
+            position = pos(0, 4),
+        }, requests[1].params)
+    end)
+
+    it("returns the hover contents of the embedded server", function()
+        start_servers({ language = "python", hover = { contents = "doc" } })
+        assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
+    end)
+
     it("attaches to bitbake buffers", function()
         vim.bo[recipe_buf].filetype = "bitbake"
         assert.is_true((vim.wait(1000, function()

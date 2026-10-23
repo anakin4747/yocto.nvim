@@ -168,7 +168,50 @@ end
 
 -- In-process language server that forwards requests on bitbake buffers to the
 -- language servers attached to the embedded documents.
-local PROXY_CAPABILITIES = {}
+local PROXY_NAME = "yocto_embedded"
+local PROXY_CAPABILITIES = { hoverProvider = true }
+
+local function buf_lines(bufnr)
+    return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+end
+
+-- Ask the bitbake server which embedded language is at params.position,
+-- map the request into that embedded doc and send it to its language server.
+local function forward(method, params, reply)
+    local uri = params.textDocument.uri
+    local recipe_buf = vim.uri_to_bufnr(uri)
+    local bitbake = vim.iter(vim.lsp.get_clients({ bufnr = recipe_buf })):find(function(client)
+        return client.name ~= PROXY_NAME
+    end)
+    if not bitbake then
+        return reply(nil, nil)
+    end
+    bitbake:request("bitbake/requestEmbeddedLanguageDocInfos", {
+        uriString = uri,
+        position = params.position,
+    }, function(err, language)
+        local embedded_uri = not err and type(language) == "string" and M.get_embedded_uri(uri, language)
+        if not embedded_uri then
+            return reply(nil, nil)
+        end
+        local embedded_buf = vim.uri_to_bufnr(embedded_uri)
+        local position = M.to_embedded_position(
+            M.get_info(embedded_uri).character_indexes,
+            buf_lines(recipe_buf),
+            buf_lines(embedded_buf),
+            params.position
+        )
+        local target = vim.lsp.get_clients({ bufnr = embedded_buf, method = method })[1]
+        if not position or not target then
+            return reply(nil, nil)
+        end
+        local embedded_params = vim.tbl_extend("force", params, {
+            textDocument = { uri = embedded_uri },
+            position = position,
+        })
+        target:request(method, embedded_params, reply, embedded_buf)
+    end, recipe_buf)
+end
 
 local function proxy_cmd(dispatchers)
     local closing = false
@@ -182,7 +225,7 @@ local function proxy_cmd(dispatchers)
         end
     end
     return {
-        request = function(method, _params, callback, notify_reply_callback)
+        request = function(method, params, callback, notify_reply_callback)
             next_id = next_id + 1
             local id = next_id
             local function reply(err, result)
@@ -194,6 +237,8 @@ local function proxy_cmd(dispatchers)
             vim.schedule(function()
                 if method == "initialize" then
                     reply(nil, { capabilities = PROXY_CAPABILITIES })
+                elseif method == "textDocument/hover" then
+                    forward(method, params, reply)
                 else
                     reply(nil, nil)
                 end
@@ -214,7 +259,7 @@ local function proxy_cmd(dispatchers)
 end
 
 function M.start_proxy(bufnr)
-    return vim.lsp.start({ name = "yocto_embedded", cmd = proxy_cmd }, { bufnr = bufnr })
+    return vim.lsp.start({ name = PROXY_NAME, cmd = proxy_cmd }, { bufnr = bufnr })
 end
 
 function M.cleanup()
