@@ -732,6 +732,25 @@ describe("embedded proxy client", function()
         assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
     end)
 
+    it("maps the hover range back to the recipe", function()
+        start_servers({
+            language = "python",
+            hover = { contents = "doc", range = { start = pos(0, 4), ["end"] = pos(0, 9) } },
+        })
+        assert.are.same(
+            { contents = "doc", range = { start = pos(0, 7), ["end"] = pos(0, 12) } },
+            hover(pos(0, 7))
+        )
+    end)
+
+    it("drops a hover range that maps to generated text", function()
+        start_servers({
+            language = "python",
+            hover = { contents = "doc", range = { start = pos(0, 0), ["end"] = pos(0, 3) } },
+        })
+        assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
+    end)
+
     it("attaches to bitbake buffers", function()
         vim.bo[recipe_buf].filetype = "bitbake"
         assert.is_true((vim.wait(1000, function()

@@ -175,6 +175,17 @@ local function buf_lines(bufnr)
     return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 end
 
+-- Per-method mapping of embedded results back to the recipe. `to_original`
+-- maps an embedded range, returning nil when it is generated text.
+local RESULT_MAPPERS = {
+    ["textDocument/hover"] = function(result, to_original)
+        if result.range then
+            result.range = to_original(result.range)
+        end
+        return result
+    end,
+}
+
 -- Ask the bitbake server which embedded language is at params.position,
 -- map the request into that embedded doc and send it to its language server.
 local function forward(method, params, reply)
@@ -209,7 +220,17 @@ local function forward(method, params, reply)
             textDocument = { uri = embedded_uri },
             position = position,
         })
-        target:request(method, embedded_params, reply, embedded_buf)
+        target:request(method, embedded_params, function(err2, result)
+            local map_result = RESULT_MAPPERS[method]
+            if result and map_result then
+                local character_indexes = M.get_info(embedded_uri).character_indexes
+                local recipe_lines, embedded_lines = buf_lines(recipe_buf), buf_lines(embedded_buf)
+                result = map_result(result, function(range)
+                    return M.to_original_range(character_indexes, recipe_lines, embedded_lines, range)
+                end)
+            end
+            reply(err2, result)
+        end, embedded_buf)
     end, recipe_buf)
 end
 
