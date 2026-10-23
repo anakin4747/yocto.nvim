@@ -5,7 +5,8 @@ local M = {}
 
 local EXTENSIONS = { bash = ".sh", python = ".py" }
 
-M.storage_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "yocto", "embedded-documents")
+-- Inside Neovim's per-session temp directory, which Neovim deletes on exit.
+M.storage_dir = vim.fn.tempname()
 
 local infos = {} -- embedded_uri -> { original_uri, language, character_indexes }
 

@@ -781,3 +781,22 @@ describe("embedded proxy client", function()
         assert.is_nil(proxy_client())
     end)
 end)
+
+describe("default storage_dir", function()
+    local original
+
+    before_each(function()
+        original = package.loaded["yocto"]
+        package.loaded["yocto"] = nil
+    end)
+
+    after_each(function()
+        package.loaded["yocto"] = original
+    end)
+
+    it("is inside the neovim session temp directory removed on exit", function()
+        local session_tmp = vim.fs.dirname(vim.fn.tempname())
+        local storage_dir = require("yocto").storage_dir
+        assert.are.equal(session_tmp, vim.fs.dirname(storage_dir))
+    end)
+end)
