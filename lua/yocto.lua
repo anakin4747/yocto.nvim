@@ -94,6 +94,31 @@ function M.select_server(filetype)
     vim.lsp.enable(default)
 end
 
+local function utf16_len(line)
+    return vim.str_utfindex(line, "utf-16")
+end
+
+-- LSP position (utf-16) -> offset in the whole document, counting "\n".
+function M.position_to_offset(lines, pos)
+    local offset = 0
+    for i = 1, pos.line do
+        offset = offset + utf16_len(lines[i]) + 1
+    end
+    return offset + pos.character
+end
+
+-- Offset in the whole document -> LSP position (utf-16); nil past the end.
+function M.offset_to_position(lines, offset)
+    for i, line in ipairs(lines) do
+        local len = utf16_len(line)
+        if offset <= len then
+            return { line = i - 1, character = offset }
+        end
+        offset = offset - len - 1
+    end
+    return nil
+end
+
 function M.cleanup()
     vim.fn.delete(M.storage_dir, "rf")
     infos = {}

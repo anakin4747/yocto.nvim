@@ -303,3 +303,56 @@ describe("notification handler registration", function()
         assert.are.equal("echo hi", read(yocto.get_embedded_uri(ORIG, "bash")))
     end)
 end)
+
+local function pos(line, character)
+    return { line = line, character = character }
+end
+
+describe("offset conversion", function()
+    local yocto = require("yocto")
+    local lines = { "ab", "", "cé", "x😀y" }
+
+    it("maps the first position to offset 0", function()
+        assert.are.equal(0, yocto.position_to_offset(lines, pos(0, 0)))
+    end)
+
+    it("counts newlines of previous lines", function()
+        assert.are.equal(3, yocto.position_to_offset(lines, pos(1, 0)))
+    end)
+
+    it("counts empty lines as one newline", function()
+        assert.are.equal(4, yocto.position_to_offset(lines, pos(2, 0)))
+    end)
+
+    it("counts non-ascii characters as one utf-16 unit", function()
+        assert.are.equal(7, yocto.position_to_offset(lines, pos(3, 0)))
+    end)
+
+    it("counts astral characters as two utf-16 units", function()
+        assert.are.equal(10, yocto.position_to_offset(lines, pos(3, 3)))
+    end)
+
+    it("maps offset 0 to the first position", function()
+        assert.are.same(pos(0, 0), yocto.offset_to_position(lines, 0))
+    end)
+
+    it("maps a newline offset to the end of its line", function()
+        assert.are.same(pos(0, 2), yocto.offset_to_position(lines, 2))
+    end)
+
+    it("maps offsets after newlines to the next line", function()
+        assert.are.same(pos(2, 0), yocto.offset_to_position(lines, 4))
+    end)
+
+    it("maps offsets after non-ascii characters in utf-16 units", function()
+        assert.are.same(pos(3, 3), yocto.offset_to_position(lines, 10))
+    end)
+
+    it("maps the end of the document", function()
+        assert.are.same(pos(3, 4), yocto.offset_to_position(lines, 11))
+    end)
+
+    it("returns nil past the end of the document", function()
+        assert.is_nil(yocto.offset_to_position(lines, 12))
+    end)
+end)
