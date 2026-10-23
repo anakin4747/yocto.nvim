@@ -636,6 +636,19 @@ describe("embedded proxy client", function()
         vim.api.nvim_buf_delete(recipe_buf, { force = true })
     end)
 
+    local function range(sl, sc, el, ec)
+        return { start = pos(sl, sc), ["end"] = pos(el, ec) }
+    end
+
+    local function embedded_uri()
+        return yocto.get_embedded_uri(ORIG, "python")
+    end
+
+    local MAPPED = range(1, 4, 1, 9) -- same in recipe and embedded doc
+    local HEADER = range(0, 4, 0, 9) -- embedded "do_foo", recipe (0, 7)-(0, 12)
+    local GENERATED = range(0, 0, 0, 3) -- embedded "def", no recipe text
+    local OS_URI = "file:///usr/lib/python3/os.py"
+
     -- Fake bitbake server reporting `language` everywhere, fake python server
     -- answering hover with `hover`, and the do_foo fixture as embedded doc.
     local function start_servers(opts)
@@ -652,14 +665,33 @@ describe("embedded proxy client", function()
         })
         vim.lsp.enable("user_bitbake")
         if opts.python ~= false then
+            local handlers = {
+                ["textDocument/hover"] = function()
+                    return opts.hover
+                end,
+            }
+            -- "EMBEDDED" in results stands for the embedded doc uri.
+            local function substitute(value)
+                if value == "EMBEDDED" then
+                    return embedded_uri()
+                elseif type(value) == "table" then
+                    local copy = {}
+                    for k, v in pairs(value) do
+                        copy[substitute(k)] = substitute(v)
+                    end
+                    return copy
+                end
+                return value
+            end
+            for method, result in pairs(opts.results or {}) do
+                handlers[method] = function()
+                    return substitute(result)
+                end
+            end
             vim.lsp.config("user_python", {
                 cmd = fake_cmd(python_messages, {
-                    capabilities = { hoverProvider = true },
-                    handlers = {
-                        ["textDocument/hover"] = function()
-                            return opts.hover
-                        end,
-                    },
+                    capabilities = vim.tbl_extend("force", { hoverProvider = true }, opts.capabilities or {}),
+                    handlers = handlers,
                 }),
                 filetypes = { "python" },
             })
@@ -685,6 +717,13 @@ describe("embedded proxy client", function()
             500,
             recipe_buf
         )
+        return response and response.result
+    end
+
+    -- Send method at position on the recipe through the proxy.
+    local function request(method, position, extra)
+        local params = vim.tbl_extend("force", { textDocument = { uri = ORIG }, position = position }, extra or {})
+        local response = proxy_client():request_sync(method, params, 500, recipe_buf)
         return response and response.result
     end
 
@@ -749,6 +788,84 @@ describe("embedded proxy client", function()
     it("returns nothing when no server is attached to the embedded doc", function()
         start_servers({ language = "python", python = false })
         assert.is_nil(hover(pos(0, 7)))
+    end)
+
+    describe("definition", function()
+        local METHODS = {
+            "textDocument/definition",
+            "textDocument/declaration",
+            "textDocument/typeDefinition",
+            "textDocument/implementation",
+        }
+
+        for _, method in ipairs(METHODS) do
+            it("advertises and forwards " .. method, function()
+                local messages = start_servers({
+                    language = "python",
+                    capabilities = {
+                        definitionProvider = true,
+                        declarationProvider = true,
+                        typeDefinitionProvider = true,
+                        implementationProvider = true,
+                    },
+                    results = { [method] = { { uri = "EMBEDDED", range = MAPPED } } },
+                })
+                assert.is_true(proxy_client():supports_method(method))
+                request(method, pos(0, 7))
+                local requests = requests_for(messages, method)
+                assert.are.equal(1, #requests)
+                assert.are.same(pos(0, 4), requests[1].params.position)
+            end)
+        end
+
+        local function definition(result)
+            start_servers({
+                language = "python",
+                capabilities = { definitionProvider = true },
+                results = { ["textDocument/definition"] = result },
+            })
+            return request("textDocument/definition", pos(1, 4))
+        end
+
+        it("maps a location in the embedded doc back to the recipe", function()
+            local result = definition({ uri = "EMBEDDED", range = MAPPED })
+            assert.are.same({ uri = ORIG, range = MAPPED }, result)
+        end)
+
+        it("maps a list of locations", function()
+            local result = definition({
+                { uri = "EMBEDDED", range = HEADER },
+                { uri = OS_URI, range = range(3, 0, 3, 5) },
+            })
+            assert.are.same({
+                { uri = ORIG, range = range(0, 7, 0, 12) },
+                { uri = OS_URI, range = range(3, 0, 3, 5) },
+            }, result)
+        end)
+
+        it("drops locations in generated text", function()
+            local result = definition({ { uri = "EMBEDDED", range = GENERATED } })
+            assert.are.same({}, result)
+        end)
+
+        it("maps location links", function()
+            local result = definition({
+                {
+                    targetUri = "EMBEDDED",
+                    targetRange = MAPPED,
+                    targetSelectionRange = HEADER,
+                    originSelectionRange = MAPPED,
+                },
+            })
+            assert.are.same({
+                {
+                    targetUri = ORIG,
+                    targetRange = MAPPED,
+                    targetSelectionRange = range(0, 7, 0, 12),
+                    originSelectionRange = MAPPED,
+                },
+            }, result)
+        end)
     end)
 
     it("attaches to bitbake buffers", function()
