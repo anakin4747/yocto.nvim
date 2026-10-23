@@ -284,15 +284,4 @@ function M.start_proxy(bufnr)
     return vim.lsp.start({ name = PROXY_NAME, cmd = proxy_cmd }, { bufnr = bufnr })
 end
 
-function M.cleanup()
-    for uri in pairs(infos) do
-        local bufnr = vim.fn.bufnr(vim.uri_to_fname(uri))
-        if bufnr ~= -1 then
-            vim.api.nvim_buf_delete(bufnr, { force = true })
-        end
-    end
-    vim.fn.delete(M.storage_dir, "rf")
-    infos = {}
-end
-
 return M

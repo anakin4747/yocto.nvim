@@ -15,6 +15,16 @@ local function doc(lang, content, idx, orig)
     }
 end
 
+-- Test teardown: wipe embedded buffers and files under dir.
+local function remove_storage(dir)
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.startswith(vim.api.nvim_buf_get_name(bufnr), dir) then
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end
+    end
+    vim.fn.delete(dir, "rf")
+end
+
 local function read(uri)
     return table.concat(vim.fn.readfile(vim.uri_to_fname(uri)), "\n")
 end
@@ -29,7 +39,7 @@ describe("embedded language docs handler", function()
     end)
 
     after_each(function()
-        docs.cleanup()
+        remove_storage(docs.storage_dir)
     end)
 
     it("writes a .sh file for a bash doc", function()
@@ -138,17 +148,6 @@ describe("embedded language docs handler", function()
         assert.is_nil(docs.get_embedded_uri(ORIG, "bash"))
     end)
 
-    it("cleanup removes storage_dir", function()
-        docs.handler(nil, { doc("bash", "a") }, {})
-        docs.cleanup()
-        assert.are.equal(0, vim.fn.isdirectory(dir))
-    end)
-
-    it("cleanup forgets recorded docs", function()
-        docs.handler(nil, { doc("bash", "a") }, {})
-        docs.cleanup()
-        assert.is_nil(docs.get_embedded_uri(ORIG, "bash"))
-    end)
 end)
 
 local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
@@ -342,7 +341,7 @@ describe("notification handler registration", function()
     end)
 
     after_each(function()
-        yocto.cleanup()
+        remove_storage(yocto.storage_dir)
     end)
 
     it("handles bitbake/EmbeddedLanguageDocs through vim.lsp.handlers", function()
@@ -530,7 +529,7 @@ describe("embedded buffers", function()
 
     after_each(function()
         stop_servers()
-        yocto.cleanup()
+        remove_storage(yocto.storage_dir)
     end)
 
     it("loads the bash doc into a buffer with filetype sh", function()
@@ -604,28 +603,6 @@ describe("embedded buffers", function()
         end)))
     end)
 
-    it("cleanup wipes the embedded buffers", function()
-        yocto.handler(nil, { doc("bash", "a"), doc("python", "b") }, {})
-        local bash_buf, python_buf = embedded_buf("bash"), embedded_buf("python")
-        yocto.cleanup()
-        assert.is_false(vim.api.nvim_buf_is_valid(bash_buf))
-        assert.is_false(vim.api.nvim_buf_is_valid(python_buf))
-    end)
-
-    it("cleanup closes the embedded doc in the language server", function()
-        local messages = {}
-        enable_user_server("sh", messages)
-        yocto.handler(nil, { doc("bash", "echo hi") }, {})
-        local uri = yocto.get_embedded_uri(ORIG, "bash")
-        vim.wait(1000, function()
-            return server_text(messages, uri) ~= nil
-        end)
-        yocto.cleanup()
-        assert.is_true((vim.wait(1000, function()
-            return server_text(messages, uri) == nil
-        end)))
-    end)
-
     it("does not list the embedded buffer", function()
         yocto.handler(nil, { doc("bash", "echo hi") }, {})
         assert.is_false(vim.bo[embedded_buf("bash")].buflisted)
@@ -649,7 +626,7 @@ describe("embedded proxy client", function()
 
     after_each(function()
         stop_servers()
-        yocto.cleanup()
+        remove_storage(yocto.storage_dir)
         vim.api.nvim_buf_delete(recipe_buf, { force = true })
     end)
 
