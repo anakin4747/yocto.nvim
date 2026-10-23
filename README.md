@@ -51,3 +51,10 @@ Run `make` to run the tests in a docker container:
 ```sh
 make
 ```
+
+## Demo
+
+
+https://github.com/user-attachments/assets/3a4736be-4d99-4691-acaa-118e320b1218
+
+
