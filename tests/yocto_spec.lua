@@ -159,8 +159,9 @@ end)
 local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
 
 -- In-process fake language server. Records requests and notifications into
--- `messages`. `opts.handlers[method](params)` answers requests and
--- `opts.capabilities` extends the advertised capabilities.
+-- `messages`. `opts.handlers[method](params)` answers requests,
+-- `opts.notifications[method](params, dispatchers)` reacts to notifications
+-- and `opts.capabilities` extends the advertised capabilities.
 local function fake_cmd(messages, opts)
     opts = opts or {}
     local capabilities = vim.tbl_extend(
@@ -203,6 +204,11 @@ local function fake_cmd(messages, opts)
             notify = function(method, params)
                 if messages then
                     table.insert(messages, { method = method, params = params })
+                end
+                if opts.notifications and opts.notifications[method] then
+                    vim.schedule(function()
+                        opts.notifications[method](params, dispatchers)
+                    end)
                 end
                 if method == "exit" then
                     close()
@@ -688,10 +694,26 @@ describe("embedded proxy client", function()
                     return substitute(result)
                 end
             end
+            -- Publish opts.diagnostics[n] for the n-th version of the doc.
+            local published = 0
+            local function publish(params, dispatchers)
+                published = published + 1
+                local diagnostics = opts.diagnostics and opts.diagnostics[published]
+                if diagnostics then
+                    dispatchers.notification("textDocument/publishDiagnostics", {
+                        uri = params.textDocument.uri,
+                        diagnostics = diagnostics,
+                    })
+                end
+            end
             vim.lsp.config("user_python", {
                 cmd = fake_cmd(python_messages, {
                     capabilities = vim.tbl_extend("force", { hoverProvider = true }, opts.capabilities or {}),
                     handlers = handlers,
+                    notifications = {
+                        ["textDocument/didOpen"] = publish,
+                        ["textDocument/didChange"] = publish,
+                    },
                 }),
                 filetypes = { "python" },
             })
@@ -1023,6 +1045,54 @@ describe("embedded proxy client", function()
             local help = { signatures = { { label = "getcwd()" } }, activeSignature = 0 }
             local result = forwarded("textDocument/signatureHelp", { signatureHelpProvider = {} }, help)
             assert.are.same(help, result)
+        end)
+    end)
+
+    describe("diagnostics", function()
+        local function lsp_diagnostic(r, message)
+            return { range = r, message = message, severity = 2, source = "fake" }
+        end
+
+        local function recipe_diagnostics(count)
+            vim.wait(500, function()
+                return #vim.diagnostic.get(recipe_buf) == count
+            end, 10)
+            return vim.diagnostic.get(recipe_buf)
+        end
+
+        it("shows embedded diagnostics on the recipe at the mapped range", function()
+            start_servers({ language = "python", diagnostics = { { lsp_diagnostic(HEADER, "bad name") } } })
+            local diagnostics = recipe_diagnostics(1)
+            assert.are.equal(1, #diagnostics)
+            assert.are.same(
+                { lnum = 0, col = 7, end_lnum = 0, end_col = 12, message = "bad name", severity = 2, source = "fake" },
+                {
+                    lnum = diagnostics[1].lnum,
+                    col = diagnostics[1].col,
+                    end_lnum = diagnostics[1].end_lnum,
+                    end_col = diagnostics[1].end_col,
+                    message = diagnostics[1].message,
+                    severity = diagnostics[1].severity,
+                    source = diagnostics[1].source,
+                }
+            )
+        end)
+
+        it("drops diagnostics in generated text", function()
+            start_servers({
+                language = "python",
+                diagnostics = { { lsp_diagnostic(GENERATED, "header"), lsp_diagnostic(MAPPED, "body") } },
+            })
+            local diagnostics = recipe_diagnostics(1)
+            assert.are.equal(1, #diagnostics)
+            assert.are.equal("body", diagnostics[1].message)
+        end)
+
+        it("clears recipe diagnostics when the embedded ones are cleared", function()
+            start_servers({ language = "python", diagnostics = { { lsp_diagnostic(MAPPED, "body") }, {} } })
+            recipe_diagnostics(1)
+            yocto.handler(nil, { doc("python", table.concat(EMBEDDED, "\n"), INDEXES) }, {})
+            assert.are.equal(0, #recipe_diagnostics(0))
         end)
     end)
 
