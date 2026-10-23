@@ -22,6 +22,16 @@ vim.api.nvim_create_autocmd("FileType", {
     end,
 })
 
+-- No pattern: BufWritePost patterns match file names, not filetypes.
+vim.api.nvim_create_autocmd({ "FileType", "BufWritePost" }, {
+    group = group,
+    callback = function(ev)
+        if vim.bo[ev.buf].filetype == "bitbake" then
+            require("yocto.oelint").run(ev.buf, { force = true })
+        end
+    end,
+})
+
 vim.api.nvim_create_autocmd("DiagnosticChanged", {
     group = group,
     callback = function(ev)
