@@ -23,9 +23,46 @@ end
 
 local FILETYPES = { bash = "sh", python = "python" }
 
--- Keep the embedded file loaded in a hidden buffer so language servers
--- enabled for its filetype attach to it and receive its updates.
-local function sync_buffer(path, language)
+-- Copy of an enabled python config rooted at the project directory, with the
+-- project's bitbake python paths for pyright/basedpyright (settings) and for
+-- zubanls and others (environment). User values win and extraPaths extend.
+local function embedded_python_config(config, project_dir, paths)
+    config = vim.deepcopy(config)
+    config.root_dir = project_dir
+    config.root_markers = nil
+    if #paths == 0 then
+        return config
+    end
+    config.settings = config.settings or {}
+    for _, section in ipairs({ "python", "basedpyright" }) do
+        local user_paths = vim.tbl_get(config.settings, section, "analysis", "extraPaths") or {}
+        config.settings = vim.tbl_deep_extend("force", config.settings, {
+            [section] = { analysis = { extraPaths = vim.list_extend(vim.deepcopy(user_paths), paths) } },
+        })
+    end
+    local joined = table.concat(paths, ":")
+    config.cmd_env = vim.tbl_extend("keep", config.cmd_env or {}, { PYTHONPATH = joined, MYPYPATH = joined })
+    return config
+end
+
+-- Start every python server enabled for the python filetype on the embedded
+-- buffer, one client per Yocto project.
+local function start_python_servers(bufnr, original_uri)
+    M.select_server("python")
+    local project_dir = M.project_dir(original_uri)
+    local paths = M.bitbake_python_paths(M.project_root(vim.uri_to_fname(original_uri)))
+    for _, config in ipairs(vim.lsp.get_configs({ enabled = true, filetype = "python" })) do
+        local ok, err = pcall(vim.lsp.start, embedded_python_config(config, project_dir, paths), { bufnr = bufnr })
+        if not ok then
+            vim.lsp.log.error("yocto: failed to start " .. config.name .. ": " .. tostring(err))
+        end
+    end
+end
+
+-- Keep the embedded file loaded in a hidden buffer so language servers for
+-- its filetype attach to it and receive its updates. Python buffers are
+-- excluded from vim.lsp.enable (buftype) and get per-project servers instead.
+local function sync_buffer(path, language, original_uri)
     local bufnr = vim.fn.bufnr(path)
     if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
         vim.api.nvim_buf_call(bufnr, function()
@@ -35,8 +72,14 @@ local function sync_buffer(path, language)
     end
     bufnr = vim.fn.bufadd(path)
     vim.bo[bufnr].buflisted = false
+    if language == "python" then
+        vim.bo[bufnr].buftype = "nowrite"
+    end
     vim.fn.bufload(bufnr)
     vim.bo[bufnr].filetype = FILETYPES[language]
+    if language == "python" then
+        start_python_servers(bufnr, original_uri)
+    end
 end
 
 local function save(doc)
@@ -46,7 +89,7 @@ local function save(doc)
     local path = path_for(doc.originalUri, doc.language)
     vim.fn.mkdir(vim.fs.dirname(path), "p")
     vim.fn.writefile(vim.split(doc.content, "\n", { plain = true }), path)
-    sync_buffer(path, doc.language)
+    sync_buffer(path, doc.language, doc.originalUri)
     infos[vim.uri_from_fname(path)] = {
         original_uri = doc.originalUri,
         language = doc.language,

@@ -221,7 +221,7 @@ end
 -- still initializing are hidden from get_clients() and vim.lsp.enable(false)
 -- unless _uninitialized is passed; they would otherwise be reused later.
 local function stop_servers()
-    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", unpack(DEFAULT_NAMES) }, false)
+    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", "user_zuban", unpack(DEFAULT_NAMES) }, false)
     for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
         client:stop(true)
     end
@@ -1133,5 +1133,135 @@ describe("project_dir", function()
 
     it("is shared by recipes outside any project", function()
         assert.are.equal(yocto.project_dir(uri("x/foo.bb")), yocto.project_dir(uri("y/bar.bb")))
+    end)
+end)
+
+describe("embedded python servers", function()
+    local yocto, root, write, messages
+
+    local function setup_project(name)
+        write(name .. "/sources/poky/bitbake/lib/bb/__init__.py")
+        write(name .. "/sources/poky/meta/lib/oe/__init__.py")
+        return vim.uri_from_fname(write(name .. "/sources/meta-foo/recipes-foo/foo/foo_1.0.bb"))
+    end
+
+    local function python_paths(name)
+        return {
+            vim.fs.joinpath(root, name, "sources/poky/bitbake/lib"),
+            vim.fs.joinpath(root, name, "sources/poky/meta/lib"),
+        }
+    end
+
+    local function enable_user_python(extra)
+        vim.lsp.config("user_python", vim.tbl_extend("force", {
+            cmd = fake_cmd(messages),
+            filetypes = { "python" },
+            root_markers = { ".git" },
+        }, extra or {}))
+        vim.lsp.enable("user_python")
+    end
+
+    -- Send a python doc for recipe_uri and return the started user client.
+    local function open_python_doc(recipe_uri)
+        yocto.handler(nil, { doc("python", "x = 1", {}, recipe_uri) }, {})
+        local bufnr = vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(recipe_uri, "python")))
+        local client
+        vim.wait(1000, function()
+            client = vim.lsp.get_clients({ bufnr = bufnr, name = "user_python" })[1]
+            return client ~= nil
+        end)
+        return client, bufnr
+    end
+
+    before_each(function()
+        yocto = require("yocto")
+        yocto.storage_dir = vim.fn.tempname()
+        root, write = temp_tree()
+        messages = {}
+    end)
+
+    after_each(function()
+        stop_servers()
+        vim.lsp.config.user_python = {}
+        remove_storage(yocto.storage_dir)
+        vim.fn.delete(root, "rf")
+    end)
+
+    it("keeps embedded python buffers out of automatic lsp attachment", function()
+        local _, bufnr = open_python_doc(setup_project("a"))
+        assert.are.equal("nowrite", vim.bo[bufnr].buftype)
+    end)
+
+    it("starts the enabled python server with the project directory as root", function()
+        enable_user_python()
+        local recipe = setup_project("a")
+        local client = open_python_doc(recipe)
+        assert.are.equal(yocto.project_dir(recipe), client.root_dir)
+        vim.wait(1000, function()
+            return #messages > 0
+        end)
+        assert.are.equal(vim.uri_from_fname(yocto.project_dir(recipe)), messages[1].params.workspaceFolders[1].uri)
+    end)
+
+    it("gives pyright and basedpyright the bitbake python paths", function()
+        enable_user_python()
+        local client = open_python_doc(setup_project("a"))
+        assert.are.same(python_paths("a"), client.settings.python.analysis.extraPaths)
+        assert.are.same(python_paths("a"), client.settings.basedpyright.analysis.extraPaths)
+    end)
+
+    it("gives zubanls and others the bitbake python paths in the environment", function()
+        enable_user_python()
+        local client = open_python_doc(setup_project("a"))
+        local joined = table.concat(python_paths("a"), ":")
+        assert.are.equal(joined, client.config.cmd_env.MYPYPATH)
+        assert.are.equal(joined, client.config.cmd_env.PYTHONPATH)
+    end)
+
+    it("keeps the user's own settings and environment", function()
+        enable_user_python({
+            settings = { python = { analysis = { extraPaths = { "/mine" }, typeCheckingMode = "off" } } },
+            cmd_env = { FOO = "1" },
+        })
+        local client = open_python_doc(setup_project("a"))
+        assert.are.same(
+            { "/mine", unpack(python_paths("a")) },
+            client.settings.python.analysis.extraPaths
+        )
+        assert.are.equal("off", client.settings.python.analysis.typeCheckingMode)
+        assert.are.equal("1", client.config.cmd_env.FOO)
+    end)
+
+    it("starts one python server per project", function()
+        enable_user_python()
+        local client_a = open_python_doc(setup_project("a"))
+        local client_b = open_python_doc(setup_project("b"))
+        assert.are_not.equal(client_a.id, client_b.id)
+        assert.are.same(python_paths("b"), client_b.settings.python.analysis.extraPaths)
+    end)
+
+    it("reuses the python server for recipes of the same project", function()
+        enable_user_python()
+        local recipe = setup_project("a")
+        local client_a = open_python_doc(recipe)
+        local other = vim.uri_from_fname(write("a/sources/meta-foo/recipes-foo/bar/bar_1.0.bb"))
+        local client_b = open_python_doc(other)
+        assert.are.equal(client_a.id, client_b.id)
+    end)
+
+    it("does not change the user's lsp config", function()
+        enable_user_python()
+        open_python_doc(setup_project("a"))
+        local config = vim.lsp.config.user_python
+        assert.is_nil(config.root_dir)
+        assert.is_nil(config.settings)
+        assert.is_nil(config.cmd_env)
+    end)
+
+    it("adds no paths for recipes outside a project", function()
+        enable_user_python()
+        local client = open_python_doc(vim.uri_from_fname(write("loose/foo_1.0.bb")))
+        assert.is_nil(vim.tbl_get(client.settings, "python", "analysis", "extraPaths"))
+        assert.is_nil(vim.tbl_get(client.config, "cmd_env", "PYTHONPATH"))
     end)
 end)
