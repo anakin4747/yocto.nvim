@@ -156,8 +156,16 @@ local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
 -- In-process fake language server. Records notifications into `messages`.
 local function fake_cmd(messages)
     local capabilities = { textDocumentSync = { openClose = true, change = 1 } }
-    return function(_dispatchers)
+    return function(dispatchers)
         local closing = false
+        local function close()
+            if not closing then
+                closing = true
+                vim.schedule(function()
+                    dispatchers.on_exit(0, 0)
+                end)
+            end
+        end
         return {
             request = function(method, _params, callback)
                 vim.schedule(function()
@@ -170,18 +178,29 @@ local function fake_cmd(messages)
                     table.insert(messages, { method = method, params = params })
                 end
                 if method == "exit" then
-                    closing = true
+                    close()
                 end
                 return true
             end,
             is_closing = function()
                 return closing
             end,
-            terminate = function()
-                closing = true
-            end,
+            terminate = close,
         }
     end
+end
+
+-- Disable all test configs and wait for their clients to exit. Clients
+-- still initializing are hidden from get_clients() and vim.lsp.enable(false)
+-- unless _uninitialized is passed; they would otherwise be reused later.
+local function stop_servers()
+    vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
+    for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
+        client:stop(true)
+    end
+    vim.wait(1000, function()
+        return #vim.lsp.get_clients({ _uninitialized = true }) == 0
+    end)
 end
 
 describe("default language server configs", function()
@@ -235,7 +254,7 @@ describe("language server selection", function()
     end
 
     before_each(function()
-        vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
+        stop_servers()
         for _, name in ipairs(DEFAULT_NAMES) do
             vim.lsp.config[name] = {}
         end
@@ -243,7 +262,7 @@ describe("language server selection", function()
     end)
 
     after_each(function()
-        vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
+        stop_servers()
         if buf and vim.api.nvim_buf_is_valid(buf) then
             vim.api.nvim_buf_delete(buf, { force = true })
         end
@@ -488,7 +507,7 @@ describe("embedded buffers", function()
     end)
 
     after_each(function()
-        vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
+        stop_servers()
         yocto.cleanup()
     end)
 
@@ -504,6 +523,63 @@ describe("embedded buffers", function()
         local bufnr = embedded_buf("python")
         assert.is_true(vim.api.nvim_buf_is_loaded(bufnr))
         assert.are.equal("python", vim.bo[bufnr].filetype)
+    end)
+
+    -- Latest text of uri as seen by the fake server, from didOpen/didChange.
+    local function server_text(messages, uri)
+        local text
+        for _, m in ipairs(messages) do
+            local td = m.params and m.params.textDocument
+            if td and td.uri == uri then
+                if m.method == "textDocument/didOpen" then
+                    text = td.text
+                elseif m.method == "textDocument/didChange" then
+                    text = m.params.contentChanges[#m.params.contentChanges].text
+                elseif m.method == "textDocument/didClose" then
+                    text = nil
+                end
+            end
+        end
+        return text
+    end
+
+    local function enable_user_server(filetype, messages)
+        vim.lsp.config("user_server", { cmd = fake_cmd(messages), filetypes = { filetype } })
+        vim.lsp.enable("user_server")
+    end
+
+    it("opens the bash doc in the language server enabled for sh", function()
+        local messages = {}
+        enable_user_server("sh", messages)
+        yocto.handler(nil, { doc("bash", "echo hi") }, {})
+        local uri = yocto.get_embedded_uri(ORIG, "bash")
+        assert.is_true((vim.wait(1000, function()
+            return server_text(messages, uri) == "echo hi\n"
+        end)))
+    end)
+
+    it("opens the python doc in the language server enabled for python", function()
+        local messages = {}
+        enable_user_server("python", messages)
+        yocto.handler(nil, { doc("python", "x = 1") }, {})
+        local uri = yocto.get_embedded_uri(ORIG, "python")
+        assert.is_true((vim.wait(1000, function()
+            return server_text(messages, uri) == "x = 1\n"
+        end)))
+    end)
+
+    it("sends updated content to the language server", function()
+        local messages = {}
+        enable_user_server("sh", messages)
+        yocto.handler(nil, { doc("bash", "old") }, {})
+        local uri = yocto.get_embedded_uri(ORIG, "bash")
+        vim.wait(1000, function()
+            return server_text(messages, uri) == "old\n"
+        end)
+        yocto.handler(nil, { doc("bash", "new") }, {})
+        assert.is_true((vim.wait(1000, function()
+            return server_text(messages, uri) == "new\n"
+        end)))
     end)
 
     it("does not list the embedded buffer", function()
