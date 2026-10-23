@@ -54,7 +54,4 @@ make
 
 ## Demo
 
-
-https://github.com/user-attachments/assets/3a4736be-4d99-4691-acaa-118e320b1218
-
-
+https://github.com/user-attachments/assets/39d1ecaa-a6d1-4746-8a98-2b58d50e402a
