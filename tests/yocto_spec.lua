@@ -62,10 +62,10 @@ describe("embedded language docs handler", function()
         assert.are.equal("x = 1", read(docs.get_embedded_uri(ORIG, "python")))
     end)
 
-    it("places files under storage_dir", function()
+    it("places files in the project directory of the recipe", function()
         docs.handler(nil, { doc("bash", "echo hi") }, {})
         local path = vim.uri_to_fname(docs.get_embedded_uri(ORIG, "bash"))
-        assert.are.equal(dir, vim.fs.dirname(path))
+        assert.are.equal(docs.project_dir(ORIG), vim.fs.dirname(path))
     end)
 
     it("names files with the sha256 of the original uri", function()
@@ -1091,5 +1091,47 @@ describe("bitbake_python_paths", function()
 
     it("returns nothing without a project root", function()
         assert.are.same({}, yocto.bitbake_python_paths(nil))
+    end)
+end)
+
+describe("project_dir", function()
+    local yocto = require("yocto")
+    local root, write
+
+    before_each(function()
+        yocto.storage_dir = vim.fn.tempname()
+        root, write = temp_tree()
+        vim.fn.mkdir(vim.fs.joinpath(root, "a", "sources"), "p")
+        vim.fn.mkdir(vim.fs.joinpath(root, "b", "sources"), "p")
+    end)
+
+    after_each(function()
+        vim.fn.delete(root, "rf")
+    end)
+
+    local function uri(relpath)
+        return vim.uri_from_fname(write(relpath))
+    end
+
+    it("is inside storage_dir", function()
+        assert.are.equal(yocto.storage_dir, vim.fs.dirname(yocto.project_dir(uri("a/sources/meta/foo.bb"))))
+    end)
+
+    it("is shared by recipes of the same project", function()
+        assert.are.equal(
+            yocto.project_dir(uri("a/sources/meta-x/foo.bb")),
+            yocto.project_dir(uri("a/sources/meta-y/bar.bb"))
+        )
+    end)
+
+    it("differs between projects", function()
+        assert.are_not.equal(
+            yocto.project_dir(uri("a/sources/meta/foo.bb")),
+            yocto.project_dir(uri("b/sources/meta/foo.bb"))
+        )
+    end)
+
+    it("is shared by recipes outside any project", function()
+        assert.are.equal(yocto.project_dir(uri("x/foo.bb")), yocto.project_dir(uri("y/bar.bb")))
     end)
 end)

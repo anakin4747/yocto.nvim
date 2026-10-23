@@ -10,8 +10,15 @@ M.storage_dir = vim.fn.tempname()
 
 local infos = {} -- embedded_uri -> { original_uri, language, character_indexes }
 
+-- Directory holding the embedded docs of all recipes in the same Yocto
+-- project as original_uri. Used as workspace root of embedded servers.
+function M.project_dir(original_uri)
+    local root = M.project_root(vim.uri_to_fname(original_uri)) or ""
+    return vim.fs.joinpath(M.storage_dir, vim.fn.sha256(root))
+end
+
 local function path_for(original_uri, language)
-    return vim.fs.joinpath(M.storage_dir, vim.fn.sha256(original_uri) .. EXTENSIONS[language])
+    return vim.fs.joinpath(M.project_dir(original_uri), vim.fn.sha256(original_uri) .. EXTENSIONS[language])
 end
 
 local FILETYPES = { bash = "sh", python = "python" }
@@ -36,8 +43,8 @@ local function save(doc)
     if not EXTENSIONS[doc.language] then
         return
     end
-    vim.fn.mkdir(M.storage_dir, "p")
     local path = path_for(doc.originalUri, doc.language)
+    vim.fn.mkdir(vim.fs.dirname(path), "p")
     vim.fn.writefile(vim.split(doc.content, "\n", { plain = true }), path)
     sync_buffer(path, doc.language)
     infos[vim.uri_from_fname(path)] = {
