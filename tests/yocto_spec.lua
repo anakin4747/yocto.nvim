@@ -1265,3 +1265,73 @@ describe("embedded python servers", function()
         assert.is_nil(vim.tbl_get(client.config, "cmd_env", "PYTHONPATH"))
     end)
 end)
+
+describe("real python servers find bitbake modules of the project", function()
+    local SERVERS = {
+        { name = "pyright", cmd = { "pyright-langserver", "--stdio" } },
+        { name = "zubanls", cmd = { "zuban", "server" } },
+    }
+
+    local yocto, root, write, recipe_buf, recipe_uri
+
+    local function proxy_hover(position)
+        local proxy = vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded" })[1]
+        if not proxy then
+            return nil
+        end
+        local response = proxy:request_sync(
+            "textDocument/hover",
+            { textDocument = { uri = recipe_uri }, position = position },
+            5000,
+            recipe_buf
+        )
+        return response and response.result
+    end
+
+    before_each(function()
+        yocto = require("yocto")
+        yocto.storage_dir = vim.fn.tempname()
+        root, write = temp_tree()
+        write("sources/poky/bitbake/lib/bb/__init__.py", {
+            "def note(msg):",
+            '    """yocto test doc"""',
+        })
+        write("sources/poky/meta/lib/oe/__init__.py")
+        local path = write("sources/meta-foo/recipes-foo/foo/foo_1.0.bb", {
+            'SUMMARY = "foo"',
+            "python do_foo() {",
+            '    bb.note("hi")',
+            "}",
+        })
+        recipe_uri = vim.uri_from_fname(path)
+        recipe_buf = vim.fn.bufadd(path)
+    end)
+
+    after_each(function()
+        stop_servers()
+        vim.lsp.config.user_python = {}
+        remove_storage(yocto.storage_dir)
+        vim.api.nvim_buf_delete(recipe_buf, { force = true })
+        vim.fn.delete(root, "rf")
+    end)
+
+    for _, server in ipairs(SERVERS) do
+        it("resolves bb with " .. server.name, function()
+            vim.lsp.config("user_python", {
+                cmd = server.cmd,
+                filetypes = { "python" },
+                root_markers = { ".git" },
+            })
+            vim.lsp.enable("user_python")
+            vim.fn.bufload(recipe_buf)
+
+            local contents
+            vim.wait(30000, function()
+                local result = proxy_hover(pos(2, 8))
+                contents = result and vim.inspect(result.contents)
+                return contents ~= nil and contents:find("yocto test doc", 1, true) ~= nil
+            end, 500)
+            assert.is_not_nil(contents and contents:find("yocto test doc", 1, true))
+        end)
+    end
+end)
