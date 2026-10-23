@@ -1,0 +1,50 @@
+From 9aa58ea8e23db5b34b7679cfd13a0885d6b468f3 Mon Sep 17 00:00:00 2001
+From: Anakin Childerhose <anakin@childerhose.ca>
+Date: Sat, 15 Nov 2025 21:46:12 -0500
+Subject: [PATCH 1/2] add custom error msg handling
+
+---
+ lua/luassert/assert.lua | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/lua/luassert/assert.lua b/lua/luassert/assert.lua
+index 7fe7569..17cd94c 100644
+--- a/lua/luassert/assert.lua
++++ b/lua/luassert/assert.lua
+@@ -48,7 +48,32 @@ local __state_meta = {
+           message = assertion.negative_message
+         end
+         local err = geterror(message, rawget(self,"failure_message"), arguments)
+-        error(err or "assertion failed!", util.errorlevel())
++
++        local function print_err(err0, level)
++          local info = debug.getinfo(level + 1)
++          local location = ""
++          local path = info.source
++
++          if path:sub(1, 1) == "@" then
++            path = path:sub(2)
++          end
++
++          if info then
++            location = string.format("ERROR   %s:%d", path, info.currentline)
++          end
++
++          print("\27[31m" .. location .. "\27[0m")
++
++          local indent = "    "
++
++          local err_lines = (err0 or "assertion failed!"):gmatch("([^\n]*)\n?")
++          for line in err_lines do
++            print(indent .. line)
++          end
++          error()
++        end
++
++        print_err(err, util.errorlevel())
+       end
+ 
+       if retargs then
+-- 
+2.51.1.dirty
+

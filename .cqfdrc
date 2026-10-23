@@ -1,0 +1,9 @@
+[project]
+org='@ORG@'
+name='@NAME@'
+
+[build]
+command=""
+docker_run_args=""
+
+# vi: ft=ini

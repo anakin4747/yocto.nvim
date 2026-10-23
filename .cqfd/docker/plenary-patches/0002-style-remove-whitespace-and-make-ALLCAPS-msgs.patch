@@ -1,0 +1,64 @@
+From b10b5fec26a98ceb02f30f106a46a939efbfd05f Mon Sep 17 00:00:00 2001
+From: Anakin Childerhose <anakin@childerhose.ca>
+Date: Sat, 15 Nov 2025 21:46:58 -0500
+Subject: [PATCH 2/2] style: remove whitespace and make ALLCAPS msgs
+
+---
+ lua/plenary/busted.lua | 20 ++++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/lua/plenary/busted.lua b/lua/plenary/busted.lua
+index ed1b68d..892d848 100644
+--- a/lua/plenary/busted.lua
++++ b/lua/plenary/busted.lua
+@@ -97,17 +97,17 @@ local color_string = function(color, str)
+   return string.format("%s[%sm%s%s[%sm", string.char(27), color_table[color] or 0, str, string.char(27), 0)
+ end
+ 
+-local SUCCESS = color_string("green", "Success")
+-local FAIL = color_string("red", "Fail")
+-local PENDING = color_string("yellow", "Pending")
++local SUCCESS = color_string("green", "SUCCESS")
++local FAIL = color_string("red", "FAILURE")
++local PENDING = color_string("yellow", "PENDING")
+ 
+ local HEADER = string.rep("=", 40)
+ 
+ mod.format_results = function(res)
+-  print ""
+-  print(color_string("green", "Success: "), #res.pass)
+-  print(color_string("red", "Failed : "), #res.fail)
+-  print(color_string("red", "Errors : "), #res.errs)
++  print(HEADER)
++  print(color_string("green", SUCCESS), #res.pass)
++  print(color_string("red", "FAILED"), #res.fail)
++  print(color_string("red", "ERRORS"), #res.errs)
+   print(HEADER)
+ end
+ 
+@@ -188,11 +188,11 @@ mod.it = function(desc, func)
+     to_insert = results.fail
+     test_result.msg = msg
+ 
+-    print(FAIL, "||", table.concat(test_result.descriptions, " "))
++    print(FAIL, table.concat(test_result.descriptions, " "))
+     print(indent(msg, 12))
+   else
+     to_insert = results.pass
+-    print(SUCCESS, "||", table.concat(test_result.descriptions, " "))
++    print(SUCCESS, table.concat(test_result.descriptions, " "))
+   end
+ 
+   table.insert(to_insert, test_result)
+@@ -219,7 +219,7 @@ mod.run = function(file)
+   file = file:gsub("\\", "/")
+ 
+   print("\n" .. HEADER)
+-  print("Testing: ", file)
++  print("Testing: " .. file)
+ 
+   local loaded, msg = loadfile(file)
+ 
+-- 
+2.51.1.dirty
+
