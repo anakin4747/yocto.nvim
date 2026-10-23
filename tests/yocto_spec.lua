@@ -751,6 +751,23 @@ describe("embedded proxy client", function()
         assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
     end)
 
+    it("does not forward when the bitbake server reports no language", function()
+        local messages = start_servers({ language = nil, hover = { contents = "doc" } })
+        assert.is_nil(hover(pos(0, 7)))
+        assert.are.equal(0, #requests_for(messages, "textDocument/hover"))
+    end)
+
+    it("does not forward positions outside the character indexes", function()
+        local messages = start_servers({ language = "python", hover = { contents = "doc" } })
+        assert.is_nil(hover(pos(2, 1)))
+        assert.are.equal(0, #requests_for(messages, "textDocument/hover"))
+    end)
+
+    it("returns nothing when no server is attached to the embedded doc", function()
+        start_servers({ language = "python", python = false })
+        assert.is_nil(hover(pos(0, 7)))
+    end)
+
     it("attaches to bitbake buffers", function()
         vim.bo[recipe_buf].filetype = "bitbake"
         assert.is_true((vim.wait(1000, function()
