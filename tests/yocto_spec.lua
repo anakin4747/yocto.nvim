@@ -1625,18 +1625,22 @@ describe("real python servers find bitbake modules of the project", function()
 
     local yocto, root, write, recipe_buf, recipe_uri
 
-    local function proxy_hover(position)
+    local function proxy_request(method, position)
         local proxy = vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded" })[1]
         if not proxy then
             return nil
         end
         local response = proxy:request_sync(
-            "textDocument/hover",
+            method,
             { textDocument = { uri = recipe_uri }, position = position },
             500,
             recipe_buf
         )
         return response and response.result
+    end
+
+    local function proxy_hover(position)
+        return proxy_request("textDocument/hover", position)
     end
 
     before_each(function()
@@ -1683,6 +1687,37 @@ describe("real python servers find bitbake modules of the project", function()
                 return contents ~= nil and contents:find("yocto test doc", 1, true) ~= nil
             end, 50)
             assert.is_not_nil(contents and contents:find("yocto test doc", 1, true))
+        end)
+
+        it("jumps to bb definitions with " .. server.name, function()
+            vim.lsp.config("user_python", { cmd = server.cmd, filetypes = { "python" } })
+            vim.lsp.enable("user_python")
+            vim.fn.bufload(recipe_buf)
+
+            local target
+            vim.wait(500, function()
+                local result = proxy_request("textDocument/definition", pos(2, 8))
+                local location = result and (result[1] or result)
+                target = location and (location.uri or location.targetUri)
+                return target ~= nil
+            end, 50)
+            assert.is_not_nil(target and target:find("bitbake/lib/bb/__init__.py", 1, true))
+        end)
+
+        it("completes bb members with " .. server.name, function()
+            vim.lsp.config("user_python", { cmd = server.cmd, filetypes = { "python" } })
+            vim.lsp.enable("user_python")
+            vim.fn.bufload(recipe_buf)
+
+            local labels = {}
+            vim.wait(500, function()
+                local result = proxy_request("textDocument/completion", pos(2, 7))
+                for _, item in ipairs(result and (result.items or result) or {}) do
+                    labels[item.label] = true
+                end
+                return labels.note ~= nil
+            end, 50)
+            assert.is_true(labels.note)
         end)
     end
 end)
