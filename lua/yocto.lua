@@ -119,6 +119,27 @@ function M.offset_to_position(lines, offset)
     return nil
 end
 
+-- Original document position -> embedded document position; nil if unmapped.
+function M.to_embedded_position(character_indexes, original_lines, embedded_lines, pos)
+    local embedded_offset = character_indexes[M.position_to_offset(original_lines, pos) + 1]
+    if not embedded_offset then
+        return nil
+    end
+    return M.offset_to_position(embedded_lines, embedded_offset)
+end
+
+-- Embedded document position -> original document position; nil for
+-- generated text. Uses the first original offset mapping to it.
+function M.to_original_position(character_indexes, original_lines, embedded_lines, pos)
+    local embedded_offset = M.position_to_offset(embedded_lines, pos)
+    for i, value in ipairs(character_indexes) do
+        if value == embedded_offset then
+            return M.offset_to_position(original_lines, i - 1)
+        end
+    end
+    return nil
+end
+
 function M.cleanup()
     vim.fn.delete(M.storage_dir, "rf")
     infos = {}

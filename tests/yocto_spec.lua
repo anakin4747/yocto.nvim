@@ -356,3 +356,85 @@ describe("offset conversion", function()
         assert.is_nil(yocto.offset_to_position(lines, 12))
     end)
 end)
+
+-- Recipe:                       Embedded python:
+--   0 python do_foo() {           0 def do_foo():
+--   1     x = 1                   1     x = 1
+--   2 }
+-- "do_foo" and the body map to their embedded counterparts; the rest of
+-- line 0 maps to the ":" (offset 13), so "def " has no original.
+local RECIPE = { "python do_foo() {", "    x = 1", "}" }
+local EMBEDDED = { "def do_foo():", "    x = 1" }
+local INDEXES = {}
+for o = 0, 28 do
+    local v
+    if o <= 6 or (o >= 13 and o <= 17) then
+        v = 13
+    elseif o <= 12 then
+        v = o - 3
+    elseif o <= 27 then
+        v = o - 4
+    else
+        v = 23
+    end
+    INDEXES[o + 1] = v
+end
+
+describe("position mapping", function()
+    local yocto = require("yocto")
+
+    describe("to_embedded_position", function()
+        it("maps through an identity mapping unchanged", function()
+            local lines = { "ab", "c" }
+            assert.are.same(
+                pos(1, 0),
+                yocto.to_embedded_position({ 0, 1, 2, 3, 4 }, lines, lines, pos(1, 0))
+            )
+        end)
+
+        it("maps a name in the function header", function()
+            assert.are.same(
+                pos(0, 4),
+                yocto.to_embedded_position(INDEXES, RECIPE, EMBEDDED, pos(0, 7))
+            )
+        end)
+
+        it("maps a position in the function body", function()
+            assert.are.same(
+                pos(1, 4),
+                yocto.to_embedded_position(INDEXES, RECIPE, EMBEDDED, pos(1, 4))
+            )
+        end)
+
+        it("returns nil past the end of the character indexes", function()
+            assert.is_nil(yocto.to_embedded_position(INDEXES, RECIPE, EMBEDDED, pos(2, 1)))
+        end)
+    end)
+
+    describe("to_original_position", function()
+        it("maps a position in the function body back", function()
+            assert.are.same(
+                pos(1, 4),
+                yocto.to_original_position(INDEXES, RECIPE, EMBEDDED, pos(1, 4))
+            )
+        end)
+
+        it("maps a name in the function header back", function()
+            assert.are.same(
+                pos(0, 7),
+                yocto.to_original_position(INDEXES, RECIPE, EMBEDDED, pos(0, 4))
+            )
+        end)
+
+        it("returns nil for generated text", function()
+            assert.is_nil(yocto.to_original_position(INDEXES, RECIPE, EMBEDDED, pos(0, 1)))
+        end)
+
+        it("uses the first matching index", function()
+            assert.are.same(
+                pos(0, 0),
+                yocto.to_original_position(INDEXES, RECIPE, EMBEDDED, pos(0, 13))
+            )
+        end)
+    end)
+end)
