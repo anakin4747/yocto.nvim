@@ -868,6 +868,164 @@ describe("embedded proxy client", function()
         end)
     end)
 
+    -- Start servers where the python server answers method with result, and
+    -- send method through the proxy at a mapped recipe position.
+    local function forwarded(method, capability, result, extra)
+        local messages = start_servers({
+            language = "python",
+            capabilities = capability,
+            results = { [method] = result },
+        })
+        return request(method, pos(1, 4), extra), requests_for(messages, method)
+    end
+
+    describe("references", function()
+        it("passes the reference context through", function()
+            local _, requests = forwarded(
+                "textDocument/references",
+                { referencesProvider = true },
+                {},
+                { context = { includeDeclaration = true } }
+            )
+            assert.are.same({ includeDeclaration = true }, requests[1].params.context)
+        end)
+
+        it("maps and drops locations", function()
+            local result = forwarded("textDocument/references", { referencesProvider = true }, {
+                { uri = "EMBEDDED", range = MAPPED },
+                { uri = "EMBEDDED", range = GENERATED },
+                { uri = OS_URI, range = MAPPED },
+            }, { context = { includeDeclaration = true } })
+            assert.are.same({ { uri = ORIG, range = MAPPED }, { uri = OS_URI, range = MAPPED } }, result)
+        end)
+    end)
+
+    describe("document highlight", function()
+        it("maps and drops highlights", function()
+            local result = forwarded("textDocument/documentHighlight", { documentHighlightProvider = true }, {
+                { range = HEADER, kind = 1 },
+                { range = GENERATED, kind = 1 },
+            })
+            assert.are.same({ { range = range(0, 7, 0, 12), kind = 1 } }, result)
+        end)
+    end)
+
+    describe("completion", function()
+        local CAPABILITY = { completionProvider = {} }
+
+        it("advertises completion with trigger characters", function()
+            start_servers({ language = "python" })
+            assert.is_true(proxy_client():supports_method("textDocument/completion"))
+            assert.is_true(vim.list_contains(
+                proxy_client().server_capabilities.completionProvider.triggerCharacters,
+                "."
+            ))
+        end)
+
+        it("keeps items without edits", function()
+            local result = forwarded("textDocument/completion", CAPABILITY, { { label = "getcwd" } })
+            assert.are.same({ { label = "getcwd" } }, result)
+        end)
+
+        it("maps text edit ranges of a completion list", function()
+            local result = forwarded("textDocument/completion", CAPABILITY, {
+                isIncomplete = true,
+                items = {
+                    { label = "do_foo", textEdit = { range = HEADER, newText = "do_foo" } },
+                },
+            })
+            assert.are.same({
+                isIncomplete = true,
+                items = {
+                    { label = "do_foo", textEdit = { range = range(0, 7, 0, 12), newText = "do_foo" } },
+                },
+            }, result)
+        end)
+
+        it("maps insert and replace edits", function()
+            local result = forwarded("textDocument/completion", CAPABILITY, {
+                { label = "x", textEdit = { insert = MAPPED, replace = HEADER, newText = "x" } },
+            })
+            assert.are.same({
+                { label = "x", textEdit = { insert = MAPPED, replace = range(0, 7, 0, 12), newText = "x" } },
+            }, result)
+        end)
+
+        it("drops items editing generated text", function()
+            local result = forwarded("textDocument/completion", CAPABILITY, {
+                { label = "bad", textEdit = { range = GENERATED, newText = "bad" } },
+                { label = "bad_extra", additionalTextEdits = { { range = GENERATED, newText = "import x" } } },
+                { label = "good", additionalTextEdits = { { range = MAPPED, newText = "y" } } },
+            })
+            assert.are.same({
+                { label = "good", additionalTextEdits = { { range = MAPPED, newText = "y" } } },
+            }, result)
+        end)
+    end)
+
+    describe("rename", function()
+        it("advertises rename with prepare support", function()
+            start_servers({ language = "python" })
+            assert.is_true(proxy_client():supports_method("textDocument/rename"))
+            assert.is_true(proxy_client():supports_method("textDocument/prepareRename"))
+        end)
+
+        it("maps workspace edit changes back to the recipe", function()
+            local result = forwarded("textDocument/rename", { renameProvider = true }, {
+                changes = {
+                    EMBEDDED = {
+                        { range = MAPPED, newText = "y" },
+                        { range = GENERATED, newText = "y" },
+                    },
+                    [OS_URI] = { { range = MAPPED, newText = "y" } },
+                },
+            }, { newName = "y" })
+            assert.are.same({
+                changes = {
+                    [ORIG] = { { range = MAPPED, newText = "y" } },
+                    [OS_URI] = { { range = MAPPED, newText = "y" } },
+                },
+            }, result)
+        end)
+
+        it("maps document changes back to the recipe", function()
+            local result = forwarded("textDocument/rename", { renameProvider = true }, {
+                documentChanges = {
+                    { textDocument = { uri = "EMBEDDED", version = 3 }, edits = { { range = HEADER, newText = "y" } } },
+                },
+            }, { newName = "y" })
+            assert.are.same({ changes = { [ORIG] = { { range = range(0, 7, 0, 12), newText = "y" } } } }, result)
+        end)
+
+        it("maps a prepareRename range", function()
+            local result = forwarded("textDocument/prepareRename", { renameProvider = { prepareProvider = true } }, HEADER)
+            assert.are.same(range(0, 7, 0, 12), result)
+        end)
+
+        it("maps a prepareRename range with placeholder", function()
+            local result = forwarded(
+                "textDocument/prepareRename",
+                { renameProvider = { prepareProvider = true } },
+                { range = MAPPED, placeholder = "x" }
+            )
+            assert.are.same({ range = MAPPED, placeholder = "x" }, result)
+        end)
+
+        it("refuses prepareRename in generated text", function()
+            local result =
+                forwarded("textDocument/prepareRename", { renameProvider = { prepareProvider = true } }, GENERATED)
+            assert.is_nil(result)
+        end)
+    end)
+
+    describe("signature help", function()
+        it("forwards signature help unchanged", function()
+            local help = { signatures = { { label = "getcwd()" } }, activeSignature = 0 }
+            local result = forwarded("textDocument/signatureHelp", { signatureHelpProvider = {} }, help)
+            assert.are.same(help, result)
+        end)
+    end)
+
     it("attaches to bitbake buffers", function()
         vim.bo[recipe_buf].filetype = "bitbake"
         assert.is_true((vim.wait(500, function()
