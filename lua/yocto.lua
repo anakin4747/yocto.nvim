@@ -13,13 +13,22 @@ local function path_for(original_uri, language)
     return vim.fs.joinpath(M.storage_dir, vim.fn.sha256(original_uri) .. EXTENSIONS[language])
 end
 
-local function reload_buffer(path)
+local FILETYPES = { bash = "sh", python = "python" }
+
+-- Keep the embedded file loaded in a hidden buffer so language servers
+-- enabled for its filetype attach to it and receive its updates.
+local function sync_buffer(path, language)
     local bufnr = vim.fn.bufnr(path)
     if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
         vim.api.nvim_buf_call(bufnr, function()
             vim.cmd("silent! edit!")
         end)
+        return
     end
+    bufnr = vim.fn.bufadd(path)
+    vim.bo[bufnr].buflisted = false
+    vim.fn.bufload(bufnr)
+    vim.bo[bufnr].filetype = FILETYPES[language]
 end
 
 local function save(doc)
@@ -29,7 +38,7 @@ local function save(doc)
     vim.fn.mkdir(M.storage_dir, "p")
     local path = path_for(doc.originalUri, doc.language)
     vim.fn.writefile(vim.split(doc.content, "\n", { plain = true }), path)
-    reload_buffer(path)
+    sync_buffer(path, doc.language)
     infos[vim.uri_from_fname(path)] = {
         original_uri = doc.originalUri,
         language = doc.language,

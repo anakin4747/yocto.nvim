@@ -153,17 +153,22 @@ end)
 
 local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
 
-local function fake_cmd()
+-- In-process fake language server. Records notifications into `messages`.
+local function fake_cmd(messages)
+    local capabilities = { textDocumentSync = { openClose = true, change = 1 } }
     return function(_dispatchers)
         local closing = false
         return {
             request = function(method, _params, callback)
                 vim.schedule(function()
-                    callback(nil, method == "initialize" and { capabilities = {} } or nil)
+                    callback(nil, method == "initialize" and { capabilities = capabilities } or nil)
                 end)
                 return true, 1
             end,
-            notify = function(method)
+            notify = function(method, params)
+                if messages then
+                    table.insert(messages, { method = method, params = params })
+                end
                 if method == "exit" then
                     closing = true
                 end
@@ -230,6 +235,7 @@ describe("language server selection", function()
     end
 
     before_each(function()
+        vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
         for _, name in ipairs(DEFAULT_NAMES) do
             vim.lsp.config[name] = {}
         end
@@ -466,5 +472,42 @@ describe("range mapping", function()
 
     it("returns nil when an embedded range start is generated text", function()
         assert.is_nil(yocto.to_original_range(INDEXES, RECIPE, EMBEDDED, range(0, 0, 0, 4)))
+    end)
+end)
+
+describe("embedded buffers", function()
+    local yocto
+
+    local function embedded_buf(language)
+        return vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(ORIG, language)))
+    end
+
+    before_each(function()
+        yocto = require("yocto")
+        yocto.storage_dir = vim.fn.tempname()
+    end)
+
+    after_each(function()
+        vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
+        yocto.cleanup()
+    end)
+
+    it("loads the bash doc into a buffer with filetype sh", function()
+        yocto.handler(nil, { doc("bash", "echo hi") }, {})
+        local bufnr = embedded_buf("bash")
+        assert.is_true(vim.api.nvim_buf_is_loaded(bufnr))
+        assert.are.equal("sh", vim.bo[bufnr].filetype)
+    end)
+
+    it("loads the python doc into a buffer with filetype python", function()
+        yocto.handler(nil, { doc("python", "x = 1") }, {})
+        local bufnr = embedded_buf("python")
+        assert.is_true(vim.api.nvim_buf_is_loaded(bufnr))
+        assert.are.equal("python", vim.bo[bufnr].filetype)
+    end)
+
+    it("does not list the embedded buffer", function()
+        yocto.handler(nil, { doc("bash", "echo hi") }, {})
+        assert.is_false(vim.bo[embedded_buf("bash")].buflisted)
     end)
 end)
