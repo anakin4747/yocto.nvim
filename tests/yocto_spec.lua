@@ -438,3 +438,33 @@ describe("position mapping", function()
         end)
     end)
 end)
+
+describe("range mapping", function()
+    local yocto = require("yocto")
+
+    local function range(sl, sc, el, ec)
+        return { start = pos(sl, sc), ["end"] = pos(el, ec) }
+    end
+
+    it("maps an original range to the embedded document", function()
+        assert.are.same(
+            range(0, 4, 0, 9),
+            yocto.to_embedded_range(INDEXES, RECIPE, EMBEDDED, range(0, 7, 0, 12))
+        )
+    end)
+
+    it("returns nil when an original range end is unmapped", function()
+        assert.is_nil(yocto.to_embedded_range(INDEXES, RECIPE, EMBEDDED, range(1, 0, 2, 1)))
+    end)
+
+    it("maps an embedded range back to the original document", function()
+        assert.are.same(
+            range(1, 4, 1, 9),
+            yocto.to_original_range(INDEXES, RECIPE, EMBEDDED, range(1, 4, 1, 9))
+        )
+    end)
+
+    it("returns nil when an embedded range start is generated text", function()
+        assert.is_nil(yocto.to_original_range(INDEXES, RECIPE, EMBEDDED, range(0, 0, 0, 4)))
+    end)
+end)

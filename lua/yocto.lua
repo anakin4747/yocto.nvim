@@ -140,6 +140,23 @@ function M.to_original_position(character_indexes, original_lines, embedded_line
     return nil
 end
 
+local function map_range(map_position, character_indexes, original_lines, embedded_lines, range)
+    local start = map_position(character_indexes, original_lines, embedded_lines, range.start)
+    local finish = map_position(character_indexes, original_lines, embedded_lines, range["end"])
+    if not start or not finish then
+        return nil
+    end
+    return { start = start, ["end"] = finish }
+end
+
+function M.to_embedded_range(...)
+    return map_range(M.to_embedded_position, ...)
+end
+
+function M.to_original_range(...)
+    return map_range(M.to_original_position, ...)
+end
+
 function M.cleanup()
     vim.fn.delete(M.storage_dir, "rf")
     infos = {}
