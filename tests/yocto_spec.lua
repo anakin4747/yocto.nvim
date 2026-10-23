@@ -582,6 +582,28 @@ describe("embedded buffers", function()
         end)))
     end)
 
+    it("cleanup wipes the embedded buffers", function()
+        yocto.handler(nil, { doc("bash", "a"), doc("python", "b") }, {})
+        local bash_buf, python_buf = embedded_buf("bash"), embedded_buf("python")
+        yocto.cleanup()
+        assert.is_false(vim.api.nvim_buf_is_valid(bash_buf))
+        assert.is_false(vim.api.nvim_buf_is_valid(python_buf))
+    end)
+
+    it("cleanup closes the embedded doc in the language server", function()
+        local messages = {}
+        enable_user_server("sh", messages)
+        yocto.handler(nil, { doc("bash", "echo hi") }, {})
+        local uri = yocto.get_embedded_uri(ORIG, "bash")
+        vim.wait(1000, function()
+            return server_text(messages, uri) ~= nil
+        end)
+        yocto.cleanup()
+        assert.is_true((vim.wait(1000, function()
+            return server_text(messages, uri) == nil
+        end)))
+    end)
+
     it("does not list the embedded buffer", function()
         yocto.handler(nil, { doc("bash", "echo hi") }, {})
         assert.is_false(vim.bo[embedded_buf("bash")].buflisted)
