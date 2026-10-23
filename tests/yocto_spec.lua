@@ -795,6 +795,13 @@ describe("embedded proxy client", function()
         assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
     end)
 
+    it("asks the bitbake server, not other clients on the recipe, for the language", function()
+        -- Like GitHub Copilot: attached to every buffer, started first.
+        vim.lsp.start({ name = "other", cmd = fake_cmd() }, { bufnr = recipe_buf })
+        start_servers({ language = "python", hover = { contents = "doc" } })
+        assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
+    end)
+
     it("does not forward when the bitbake server reports no language", function()
         local messages = start_servers({ language = nil, hover = { contents = "doc" } })
         assert.is_nil(hover(pos(0, 7)))

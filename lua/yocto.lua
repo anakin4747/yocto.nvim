@@ -522,8 +522,12 @@ end
 local function forward(method, params, reply)
     local uri = params.textDocument.uri
     local recipe_buf = vim.uri_to_bufnr(uri)
+    -- Other clients attach to recipes too (e.g. GitHub Copilot); only a
+    -- bitbake language server knows the embedded language at a position.
     local bitbake = vim.iter(vim.lsp.get_clients({ bufnr = recipe_buf })):find(function(client)
         return client.name ~= PROXY_NAME
+            and type(client.config.filetypes) == "table"
+            and vim.list_contains(client.config.filetypes, "bitbake")
     end)
     if not bitbake then
         return reply(nil, nil)
