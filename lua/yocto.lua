@@ -61,6 +61,39 @@ function M.get_info(embedded_uri)
     return infos[embedded_uri]
 end
 
+local DEFAULT_CONFIGS = {
+    yocto_bitbake = { cmd = { "language-server-bitbake", "--stdio" }, filetypes = { "bitbake" } },
+    yocto_bash = { cmd = { "bash-language-server", "start" }, filetypes = { "sh" } },
+    yocto_python = { cmd = { "pyright-langserver", "--stdio" }, filetypes = { "python" } },
+}
+
+local DEFAULT_FOR_FILETYPE = {
+    bitbake = "yocto_bitbake",
+    sh = "yocto_bash",
+    python = "yocto_python",
+}
+
+-- Register fallback configs; anything the user already set wins.
+function M.register_defaults()
+    for name, defaults in pairs(DEFAULT_CONFIGS) do
+        vim.lsp.config[name] = vim.tbl_extend("force", defaults, vim.lsp.config[name] or {})
+    end
+end
+
+-- Enable the fallback config for filetype unless the user enabled one.
+function M.select_server(filetype)
+    local default = DEFAULT_FOR_FILETYPE[filetype]
+    if not default then
+        return
+    end
+    for _, config in ipairs(vim.lsp.get_configs({ enabled = true, filetype = filetype })) do
+        if config.name ~= default then
+            return
+        end
+    end
+    vim.lsp.enable(default)
+end
+
 function M.cleanup()
     vim.fn.delete(M.storage_dir, "rf")
     infos = {}

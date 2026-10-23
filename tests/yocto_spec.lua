@@ -150,3 +150,156 @@ describe("embedded language docs handler", function()
         assert.is_nil(docs.get_embedded_uri(ORIG, "bash"))
     end)
 end)
+
+local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
+
+local function fake_cmd()
+    return function(_dispatchers)
+        local closing = false
+        return {
+            request = function(method, _params, callback)
+                vim.schedule(function()
+                    callback(nil, method == "initialize" and { capabilities = {} } or nil)
+                end)
+                return true, 1
+            end,
+            notify = function(method)
+                if method == "exit" then
+                    closing = true
+                end
+                return true
+            end,
+            is_closing = function()
+                return closing
+            end,
+            terminate = function()
+                closing = true
+            end,
+        }
+    end
+end
+
+describe("default language server configs", function()
+    local yocto
+
+    before_each(function()
+        for _, name in ipairs(DEFAULT_NAMES) do
+            vim.lsp.config[name] = {}
+        end
+        yocto = require("yocto")
+    end)
+
+    it("registers yocto_bitbake for bitbake files", function()
+        yocto.register_defaults()
+        assert.are.same({ "language-server-bitbake", "--stdio" }, vim.lsp.config.yocto_bitbake.cmd)
+        assert.are.same({ "bitbake" }, vim.lsp.config.yocto_bitbake.filetypes)
+    end)
+
+    it("registers yocto_bash for sh files", function()
+        yocto.register_defaults()
+        assert.are.same({ "bash-language-server", "start" }, vim.lsp.config.yocto_bash.cmd)
+        assert.are.same({ "sh" }, vim.lsp.config.yocto_bash.filetypes)
+    end)
+
+    it("registers yocto_python for python files", function()
+        yocto.register_defaults()
+        assert.are.same({ "pyright-langserver", "--stdio" }, vim.lsp.config.yocto_python.cmd)
+        assert.are.same({ "python" }, vim.lsp.config.yocto_python.filetypes)
+    end)
+
+    it("keeps user settings made before registration", function()
+        vim.lsp.config("yocto_bash", { cmd = { "my-bash-ls" } })
+        yocto.register_defaults()
+        assert.are.same({ "my-bash-ls" }, vim.lsp.config.yocto_bash.cmd)
+        assert.are.same({ "sh" }, vim.lsp.config.yocto_bash.filetypes)
+    end)
+
+    it("lets user settings made after registration win", function()
+        yocto.register_defaults()
+        vim.lsp.config("yocto_bash", { cmd = { "my-bash-ls" } })
+        assert.are.same({ "my-bash-ls" }, vim.lsp.config.yocto_bash.cmd)
+    end)
+end)
+
+describe("language server selection", function()
+    local buf
+
+    local function open_with_filetype(ft)
+        buf = vim.api.nvim_create_buf(true, false)
+        vim.bo[buf].filetype = ft
+    end
+
+    before_each(function()
+        for _, name in ipairs(DEFAULT_NAMES) do
+            vim.lsp.config[name] = {}
+        end
+        require("yocto").register_defaults()
+    end)
+
+    after_each(function()
+        vim.lsp.enable({ "user_server", unpack(DEFAULT_NAMES) }, false)
+        if buf and vim.api.nvim_buf_is_valid(buf) then
+            vim.api.nvim_buf_delete(buf, { force = true })
+        end
+    end)
+
+    it("enables yocto_bash for sh when no other config is enabled", function()
+        open_with_filetype("sh")
+        assert.is_true(vim.lsp.is_enabled("yocto_bash"))
+    end)
+
+    it("enables yocto_python for python when no other config is enabled", function()
+        open_with_filetype("python")
+        assert.is_true(vim.lsp.is_enabled("yocto_python"))
+    end)
+
+    it("enables yocto_bitbake for bitbake when no other config is enabled", function()
+        open_with_filetype("bitbake")
+        assert.is_true(vim.lsp.is_enabled("yocto_bitbake"))
+    end)
+
+    it("does not enable the default when a user config is enabled for the filetype", function()
+        vim.lsp.config("user_server", { cmd = fake_cmd(), filetypes = { "sh" } })
+        vim.lsp.enable("user_server")
+        open_with_filetype("sh")
+        assert.is_false(vim.lsp.is_enabled("yocto_bash"))
+    end)
+
+    it("ignores enabled user configs for other filetypes", function()
+        vim.lsp.config("user_server", { cmd = fake_cmd(), filetypes = { "lua" } })
+        vim.lsp.enable("user_server")
+        open_with_filetype("sh")
+        assert.is_true(vim.lsp.is_enabled("yocto_bash"))
+    end)
+
+    it("ignores user configs that are not enabled", function()
+        vim.lsp.config("user_server", { cmd = fake_cmd(), filetypes = { "sh" } })
+        open_with_filetype("sh")
+        assert.is_true(vim.lsp.is_enabled("yocto_bash"))
+    end)
+
+    it("enables nothing for unrelated filetypes", function()
+        open_with_filetype("lua")
+        for _, name in ipairs(DEFAULT_NAMES) do
+            assert.is_false(vim.lsp.is_enabled(name))
+        end
+    end)
+end)
+
+describe("notification handler registration", function()
+    local yocto
+
+    before_each(function()
+        yocto = require("yocto")
+        yocto.storage_dir = vim.fn.tempname()
+    end)
+
+    after_each(function()
+        yocto.cleanup()
+    end)
+
+    it("handles bitbake/EmbeddedLanguageDocs through vim.lsp.handlers", function()
+        vim.lsp.handlers["bitbake/EmbeddedLanguageDocs"](nil, { doc("bash", "echo hi") }, {})
+        assert.are.equal("echo hi", read(yocto.get_embedded_uri(ORIG, "bash")))
+    end)
+end)
