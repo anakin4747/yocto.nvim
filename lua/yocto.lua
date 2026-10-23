@@ -107,6 +107,48 @@ local function read_vscode_bitbake_settings(root)
     return settings
 end
 
+local function is_dir(path)
+    return vim.fn.isdirectory(path) == 1
+end
+
+-- Python import paths of bitbake's `bb` and openembedded-core's `oe` modules
+-- for the project at root. pathToBitbakeFolder from the project's
+-- .vscode/settings.json wins over the usual poky and oe-core layouts.
+function M.bitbake_python_paths(root)
+    if not root then
+        return {}
+    end
+    local candidates = {}
+    local configured = read_vscode_bitbake_settings(root).pathToBitbakeFolder
+    if type(configured) == "string" then
+        table.insert(candidates, (configured:gsub("%${workspaceFolder}", root)))
+    end
+    for _, prefix in ipairs({ "sources", "layers", "." }) do
+        table.insert(candidates, vim.fs.joinpath(root, prefix, "poky", "bitbake"))
+        table.insert(candidates, vim.fs.joinpath(root, prefix, "bitbake"))
+    end
+    local bitbake = vim.iter(candidates):find(function(dir)
+        return is_dir(vim.fs.joinpath(dir, "lib", "bb"))
+    end)
+    if not bitbake then
+        return {}
+    end
+    bitbake = vim.fs.normalize(bitbake)
+
+    local oe_candidates = { vim.fs.joinpath(vim.fs.dirname(bitbake), "meta", "lib") }
+    for _, prefix in ipairs({ "sources", "layers", "." }) do
+        table.insert(oe_candidates, vim.fs.joinpath(root, prefix, "openembedded-core", "meta", "lib"))
+    end
+    local oe = vim.iter(oe_candidates):find(function(dir)
+        return is_dir(vim.fs.joinpath(dir, "oe"))
+    end)
+    local paths = { vim.fs.joinpath(bitbake, "lib") }
+    if oe then
+        table.insert(paths, vim.fs.normalize(oe))
+    end
+    return paths
+end
+
 -- Settings are applied in place: the client shares this settings table and
 -- sends it in workspace/didChangeConfiguration after initialization.
 local function bitbake_before_init(_, config)

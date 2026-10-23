@@ -1018,3 +1018,78 @@ describe("project_root", function()
         assert.is_nil(yocto.project_root(write("foo_1.0.bb")))
     end)
 end)
+
+describe("bitbake_python_paths", function()
+    local yocto = require("yocto")
+    local root, write
+
+    local function bitbake_at(dir)
+        write(dir .. "/lib/bb/__init__.py")
+    end
+
+    local function oe_at(dir)
+        write(dir .. "/lib/oe/__init__.py")
+    end
+
+    local function abs(relpath)
+        return vim.fs.joinpath(root, relpath)
+    end
+
+    before_each(function()
+        root, write = temp_tree()
+    end)
+
+    after_each(function()
+        vim.fn.delete(root, "rf")
+    end)
+
+    for _, prefix in ipairs({ "sources", "layers" }) do
+        it("finds poky under " .. prefix, function()
+            bitbake_at(prefix .. "/poky/bitbake")
+            oe_at(prefix .. "/poky/meta")
+            assert.are.same(
+                { abs(prefix .. "/poky/bitbake/lib"), abs(prefix .. "/poky/meta/lib") },
+                yocto.bitbake_python_paths(root)
+            )
+        end)
+
+        it("finds separate bitbake and openembedded-core under " .. prefix, function()
+            bitbake_at(prefix .. "/bitbake")
+            oe_at(prefix .. "/openembedded-core/meta")
+            assert.are.same(
+                { abs(prefix .. "/bitbake/lib"), abs(prefix .. "/openembedded-core/meta/lib") },
+                yocto.bitbake_python_paths(root)
+            )
+        end)
+    end
+
+    it("finds bitbake when the project root is poky itself", function()
+        bitbake_at("bitbake")
+        oe_at("meta")
+        assert.are.same({ abs("bitbake/lib"), abs("meta/lib") }, yocto.bitbake_python_paths(root))
+    end)
+
+    it("uses pathToBitbakeFolder from .vscode/settings.json", function()
+        bitbake_at("sources/poky/bitbake")
+        bitbake_at("tools/bitbake")
+        oe_at("tools/meta")
+        write(".vscode/settings.json", {
+            '{ "bitbake.pathToBitbakeFolder": "${workspaceFolder}/tools/bitbake" }',
+        })
+        assert.are.same({ abs("tools/bitbake/lib"), abs("tools/meta/lib") }, yocto.bitbake_python_paths(root))
+    end)
+
+    it("returns only bitbake when oe is not found", function()
+        bitbake_at("sources/poky/bitbake")
+        assert.are.same({ abs("sources/poky/bitbake/lib") }, yocto.bitbake_python_paths(root))
+    end)
+
+    it("returns nothing when bitbake is not found", function()
+        oe_at("sources/poky/meta")
+        assert.are.same({}, yocto.bitbake_python_paths(root))
+    end)
+
+    it("returns nothing without a project root", function()
+        assert.are.same({}, yocto.bitbake_python_paths(nil))
+    end)
+end)
