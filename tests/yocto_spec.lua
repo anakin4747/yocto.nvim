@@ -225,7 +225,7 @@ local function stop_servers()
     for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
         client:stop(true)
     end
-    vim.wait(1000, function()
+    vim.wait(500, function()
         return #vim.lsp.get_clients({ _uninitialized = true }) == 0
     end)
 end
@@ -580,7 +580,7 @@ describe("embedded buffers", function()
         enable_user_server("sh", messages)
         yocto.handler(nil, { doc("bash", "echo hi") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "bash")
-        assert.is_true((vim.wait(1000, function()
+        assert.is_true((vim.wait(500, function()
             return server_text(messages, uri) == "echo hi\n"
         end)))
     end)
@@ -590,7 +590,7 @@ describe("embedded buffers", function()
         enable_user_server("python", messages)
         yocto.handler(nil, { doc("python", "x = 1") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "python")
-        assert.is_true((vim.wait(1000, function()
+        assert.is_true((vim.wait(500, function()
             return server_text(messages, uri) == "x = 1\n"
         end)))
     end)
@@ -600,11 +600,11 @@ describe("embedded buffers", function()
         enable_user_server("sh", messages)
         yocto.handler(nil, { doc("bash", "old") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "bash")
-        vim.wait(1000, function()
+        vim.wait(500, function()
             return server_text(messages, uri) == "old\n"
         end)
         yocto.handler(nil, { doc("bash", "new") }, {})
-        assert.is_true((vim.wait(1000, function()
+        assert.is_true((vim.wait(500, function()
             return server_text(messages, uri) == "new\n"
         end)))
     end)
@@ -669,7 +669,7 @@ describe("embedded proxy client", function()
         vim.bo[recipe_buf].filetype = "bitbake"
         yocto.handler(nil, { doc("python", table.concat(EMBEDDED, "\n"), INDEXES) }, {})
         local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(ORIG, "python")))
-        vim.wait(1000, function()
+        vim.wait(500, function()
             return proxy_client() ~= nil
                 and #vim.lsp.get_clients({ bufnr = recipe_buf, name = "user_bitbake" }) == 1
                 and (opts.python == false
@@ -682,7 +682,7 @@ describe("embedded proxy client", function()
         local response = proxy_client():request_sync(
             "textDocument/hover",
             { textDocument = { uri = ORIG }, position = position },
-            1000,
+            500,
             recipe_buf
         )
         return response and response.result
@@ -753,7 +753,7 @@ describe("embedded proxy client", function()
 
     it("attaches to bitbake buffers", function()
         vim.bo[recipe_buf].filetype = "bitbake"
-        assert.is_true((vim.wait(1000, function()
+        assert.is_true((vim.wait(500, function()
             return proxy_client() ~= nil
         end)))
     end)
@@ -803,7 +803,7 @@ describe("with real language servers", function()
         local response = proxy:request_sync(
             "textDocument/hover",
             { textDocument = { uri = recipe_uri }, position = position },
-            5000,
+            500,
             recipe_buf
         )
         return response and response.result
@@ -812,10 +812,10 @@ describe("with real language servers", function()
     -- Language servers may answer nothing until they finished indexing.
     local function eventual_hover(position)
         local result
-        vim.wait(30000, function()
+        vim.wait(500, function()
             result = proxy_hover(position)
             return result ~= nil
-        end, 500)
+        end, 50)
         return result
     end
 
@@ -828,16 +828,20 @@ describe("with real language servers", function()
         vim.fn.writefile(REAL_RECIPE, path)
         recipe_uri = vim.uri_from_fname(path)
         recipe_buf = vim.fn.bufadd(path)
+        -- zubanls starts much faster than pyright.
+        vim.lsp.config("user_python", { cmd = { "zuban", "server" }, filetypes = { "python" } })
+        vim.lsp.enable("user_python")
         vim.fn.bufload(recipe_buf)
         assert.are.equal("bitbake", vim.bo[recipe_buf].filetype)
-        assert.is_true((vim.wait(30000, function()
+        assert.is_true((vim.wait(500, function()
             return yocto.get_embedded_uri(recipe_uri, "bash") ~= nil
                 and yocto.get_embedded_uri(recipe_uri, "python") ~= nil
-        end, 100)))
+        end, 10)))
     end)
 
     after_each(function()
         stop_servers()
+        vim.lsp.config.user_python = {}
         remove_storage(yocto.storage_dir)
         vim.api.nvim_buf_delete(recipe_buf, { force = true })
         vim.fn.delete(dir, "rf")
@@ -849,7 +853,7 @@ describe("with real language servers", function()
         assert.is_not_nil(result.contents)
     end)
 
-    it("hovers python code through pyright", function()
+    it("hovers python code through zubanls", function()
         local result = eventual_hover(pos(6, 5))
         assert.is_not_nil(result)
         assert.is_not_nil(result.contents)
@@ -871,7 +875,7 @@ describe("bitbake project settings", function()
         local path = write("sources/meta-foo/recipes-foo/foo/foo_1.0.bb", { 'SUMMARY = "foo"' })
         recipe_buf = vim.fn.bufadd(path)
         vim.fn.bufload(recipe_buf)
-        vim.wait(1000, function()
+        vim.wait(500, function()
             return #vim.tbl_filter(function(m)
                 return m.method == "workspace/didChangeConfiguration"
             end, messages) > 0
@@ -1166,7 +1170,7 @@ describe("embedded python servers", function()
         yocto.handler(nil, { doc("python", "x = 1", {}, recipe_uri) }, {})
         local bufnr = vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(recipe_uri, "python")))
         local client
-        vim.wait(1000, function()
+        vim.wait(500, function()
             client = vim.lsp.get_clients({ bufnr = bufnr, name = "user_python" })[1]
             return client ~= nil
         end)
@@ -1188,6 +1192,7 @@ describe("embedded python servers", function()
     end)
 
     it("keeps embedded python buffers out of automatic lsp attachment", function()
+        enable_user_python()
         local _, bufnr = open_python_doc(setup_project("a"))
         assert.are.equal("nowrite", vim.bo[bufnr].buftype)
     end)
@@ -1197,7 +1202,7 @@ describe("embedded python servers", function()
         local recipe = setup_project("a")
         local client = open_python_doc(recipe)
         assert.are.equal(yocto.project_dir(recipe), client.root_dir)
-        vim.wait(1000, function()
+        vim.wait(500, function()
             return #messages > 0
         end)
         assert.are.equal(vim.uri_from_fname(yocto.project_dir(recipe)), messages[1].params.workspaceFolders[1].uri)
@@ -1267,8 +1272,9 @@ describe("embedded python servers", function()
 end)
 
 describe("real python servers find bitbake modules of the project", function()
+    -- pyright takes over a second to start; its paths are covered by the
+    -- settings tests with a fake server.
     local SERVERS = {
-        { name = "pyright", cmd = { "pyright-langserver", "--stdio" } },
         { name = "zubanls", cmd = { "zuban", "server" } },
     }
 
@@ -1282,7 +1288,7 @@ describe("real python servers find bitbake modules of the project", function()
         local response = proxy:request_sync(
             "textDocument/hover",
             { textDocument = { uri = recipe_uri }, position = position },
-            5000,
+            500,
             recipe_buf
         )
         return response and response.result
@@ -1326,11 +1332,11 @@ describe("real python servers find bitbake modules of the project", function()
             vim.fn.bufload(recipe_buf)
 
             local contents
-            vim.wait(30000, function()
+            vim.wait(500, function()
                 local result = proxy_hover(pos(2, 8))
                 contents = result and vim.inspect(result.contents)
                 return contents ~= nil and contents:find("yocto test doc", 1, true) ~= nil
-            end, 500)
+            end, 50)
             assert.is_not_nil(contents and contents:find("yocto test doc", 1, true))
         end)
     end
