@@ -1599,6 +1599,36 @@ describe("embedded python servers", function()
         assert.are.equal(client_a.id, client_b.id)
     end)
 
+    it("keeps the python server attached when the doc is updated", function()
+        enable_user_python()
+        local recipe = setup_project("a")
+        local client, bufnr = open_python_doc(recipe)
+        yocto.handler(nil, { doc("python", "x = 2", {}, recipe) }, {})
+        assert.is_true(vim.lsp.buf_is_attached(bufnr, client.id))
+    end)
+
+    it("sends updated python content to the python server", function()
+        enable_user_python()
+        local recipe = setup_project("a")
+        open_python_doc(recipe)
+        yocto.handler(nil, { doc("python", "x = 2", {}, recipe) }, {})
+        local uri = yocto.get_embedded_uri(recipe, "python")
+        assert.is_true((vim.wait(500, function()
+            local text
+            for _, m in ipairs(messages) do
+                local td = m.params and m.params.textDocument
+                if td and td.uri == uri then
+                    if m.method == "textDocument/didOpen" then
+                        text = td.text
+                    elseif m.method == "textDocument/didChange" then
+                        text = m.params.contentChanges[#m.params.contentChanges].text
+                    end
+                end
+            end
+            return text == "x = 2\n"
+        end, 10)))
+    end)
+
     it("does not change the user's lsp config", function()
         enable_user_python()
         open_python_doc(setup_project("a"))

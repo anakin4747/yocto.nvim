@@ -62,12 +62,13 @@ end
 -- Keep the embedded file loaded in a hidden buffer so language servers for
 -- its filetype attach to it and receive its updates. Python buffers are
 -- excluded from vim.lsp.enable (buftype) and get per-project servers instead.
-local function sync_buffer(path, language, original_uri)
+-- Updates replace the buffer lines in place: reloading with :edit! would
+-- detach the language servers.
+local function sync_buffer(path, lines, language, original_uri)
     local bufnr = vim.fn.bufnr(path)
     if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
-        vim.api.nvim_buf_call(bufnr, function()
-            vim.cmd("silent! edit!")
-        end)
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        vim.bo[bufnr].modified = false
         return
     end
     bufnr = vim.fn.bufadd(path)
@@ -88,8 +89,9 @@ local function save(doc)
     end
     local path = path_for(doc.originalUri, doc.language)
     vim.fn.mkdir(vim.fs.dirname(path), "p")
-    vim.fn.writefile(vim.split(doc.content, "\n", { plain = true }), path)
-    sync_buffer(path, doc.language, doc.originalUri)
+    local lines = vim.split(doc.content, "\n", { plain = true })
+    vim.fn.writefile(lines, path)
+    sync_buffer(path, lines, doc.language, doc.originalUri)
     infos[vim.uri_from_fname(path)] = {
         original_uri = doc.originalUri,
         language = doc.language,
