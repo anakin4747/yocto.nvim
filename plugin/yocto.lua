@@ -1,6 +1,5 @@
-" Entry point for yocto
 
-if exists('g:loaded_yocto')
-    finish
-endif
-let g:loaded_yocto = 1
+if vim.g.loaded_yocto then
+    return
+end
+vim.g.loaded_yocto = true

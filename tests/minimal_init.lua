@@ -1,6 +1,23 @@
 vim.opt.swapfile = false
 vim.opt.runtimepath:append('.')
-vim.cmd('runtime plugin/plenary.lua')
+
+local plenary_dirs = {
+    vim.env.PLENARY_DIR,
+    '/usr/local/share/nvim/site/pack/plenary/start/plenary.nvim',
+}
+for _, d in ipairs(plenary_dirs) do
+    if d and vim.fn.isdirectory(d) == 1 then
+        vim.opt.runtimepath:append(d)
+        break
+    end
+end
+
+if not pcall(require, 'plenary') then
+    io.stderr:write('plenary.nvim not found on runtimepath\n')
+    vim.cmd('cquit 1')
+end
+
+vim.cmd('runtime plugin/plenary.vim')
 vim.cmd('runtime plugin/yocto.lua')
 
 vim.g.i_am_in_a_test = true
