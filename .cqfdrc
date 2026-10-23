@@ -1,6 +1,6 @@
 [project]
-org='@ORG@'
-name='@NAME@'
+org='anakin4747'
+name='yocto'
 
 [build]
 command=""
