@@ -7,8 +7,7 @@ cqfd:
 .PHONY: test tests
 test tests:
 	@cog check --from-latest-tag
-	@-./scripts/run_tests
-	@./scripts/print_cloc
+	@./scripts/run_tests
 
 INSTALL_DIR ?= $(HOME)/.local/share/nvim/site/pack/core/opt/yocto.nvim
 
