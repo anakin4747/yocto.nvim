@@ -631,3 +631,38 @@ describe("embedded buffers", function()
         assert.is_false(vim.bo[embedded_buf("bash")].buflisted)
     end)
 end)
+
+describe("embedded proxy client", function()
+    local yocto, recipe_buf
+
+    local function proxy_client()
+        return vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded" })[1]
+    end
+
+    before_each(function()
+        yocto = require("yocto")
+        yocto.storage_dir = vim.fn.tempname()
+        recipe_buf = vim.api.nvim_create_buf(true, false)
+        vim.api.nvim_buf_set_name(recipe_buf, vim.uri_to_fname(ORIG))
+        vim.api.nvim_buf_set_lines(recipe_buf, 0, -1, false, RECIPE)
+    end)
+
+    after_each(function()
+        stop_servers()
+        yocto.cleanup()
+        vim.api.nvim_buf_delete(recipe_buf, { force = true })
+    end)
+
+    it("attaches to bitbake buffers", function()
+        vim.bo[recipe_buf].filetype = "bitbake"
+        assert.is_true((vim.wait(1000, function()
+            return proxy_client() ~= nil
+        end)))
+    end)
+
+    it("does not attach to other buffers", function()
+        vim.bo[recipe_buf].filetype = "sh"
+        vim.wait(100)
+        assert.is_nil(proxy_client())
+    end)
+end)

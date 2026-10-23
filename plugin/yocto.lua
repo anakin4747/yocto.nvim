@@ -16,5 +16,8 @@ vim.api.nvim_create_autocmd("FileType", {
     pattern = { "bitbake", "sh", "python" },
     callback = function(ev)
         require("yocto").select_server(ev.match)
+        if ev.match == "bitbake" then
+            require("yocto").start_proxy(ev.buf)
+        end
     end,
 })

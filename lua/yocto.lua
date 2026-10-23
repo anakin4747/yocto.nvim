@@ -166,6 +166,57 @@ function M.to_original_range(...)
     return map_range(M.to_original_position, ...)
 end
 
+-- In-process language server that forwards requests on bitbake buffers to the
+-- language servers attached to the embedded documents.
+local PROXY_CAPABILITIES = {}
+
+local function proxy_cmd(dispatchers)
+    local closing = false
+    local next_id = 0
+    local function close()
+        if not closing then
+            closing = true
+            vim.schedule(function()
+                dispatchers.on_exit(0, 0)
+            end)
+        end
+    end
+    return {
+        request = function(method, _params, callback, notify_reply_callback)
+            next_id = next_id + 1
+            local id = next_id
+            local function reply(err, result)
+                callback(err, result)
+                if notify_reply_callback then
+                    notify_reply_callback(id)
+                end
+            end
+            vim.schedule(function()
+                if method == "initialize" then
+                    reply(nil, { capabilities = PROXY_CAPABILITIES })
+                else
+                    reply(nil, nil)
+                end
+            end)
+            return true, id
+        end,
+        notify = function(method)
+            if method == "exit" then
+                close()
+            end
+            return true
+        end,
+        is_closing = function()
+            return closing
+        end,
+        terminate = close,
+    }
+end
+
+function M.start_proxy(bufnr)
+    return vim.lsp.start({ name = "yocto_embedded", cmd = proxy_cmd }, { bufnr = bufnr })
+end
+
 function M.cleanup()
     for uri in pairs(infos) do
         local bufnr = vim.fn.bufnr(vim.uri_to_fname(uri))
