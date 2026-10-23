@@ -66,7 +66,7 @@ function M.run(bufnr, opts)
         return false, "buffer has unsaved changes"
     end
     if job and not opts.force then
-        return false, "oelint-adv is still running, use :Oelint! to restart it"
+        return false, "oelint-adv is still running"
     end
     M.stop()
 

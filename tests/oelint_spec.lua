@@ -187,7 +187,7 @@ describe("oelint run", function()
         assert.is_true(oelint.run(bufnr))
         local ok, err = oelint.run(bufnr)
         assert.is_false(ok)
-        assert.are.equal("oelint-adv is still running, use :Oelint! to restart it", err)
+        assert.are.equal("oelint-adv is still running", err)
     end)
 
     it("restarts a run in progress when forced", function()
