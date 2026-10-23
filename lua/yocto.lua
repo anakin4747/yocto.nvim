@@ -410,18 +410,35 @@ local function python_doc(lines, lnum)
 end
 LANGUAGES.python.doc = python_doc
 
--- Signature and the comment block right above a shell function whose
--- definition is at line lnum.
-LANGUAGES.bash.doc = function(lines, lnum)
-    local comment = {}
-    for i = lnum - 1, 1, -1 do
-        local text = lines[i]:match("^%s*#%s?(.*)$")
-        if not text then
-            break
-        end
-        table.insert(comment, 1, text)
+-- Text of the `#` comment lines lines[first..last], without blank lines
+-- around it, or nil.
+local function comment_text(lines, first, last)
+    local text = {}
+    for i = first, last do
+        table.insert(text, lines[i]:match("^%s*#%s?(.*)$"))
     end
-    return { signature = lines[lnum], doc = #comment > 0 and table.concat(comment, "\n") or nil }
+    local joined = vim.trim(table.concat(text, "\n"))
+    return joined ~= "" and joined or nil
+end
+
+-- Signature and the comment blocks right above a shell function whose
+-- definition is at line lnum and at the top of its body.
+LANGUAGES.bash.doc = function(lines, lnum)
+    local function is_comment(i)
+        return lines[i] ~= nil and lines[i]:match("^%s*#") ~= nil
+    end
+    local above = lnum
+    while is_comment(above - 1) do
+        above = above - 1
+    end
+    local below = lnum
+    while is_comment(below + 1) do
+        below = below + 1
+    end
+    local parts = {}
+    table.insert(parts, comment_text(lines, above, lnum - 1))
+    table.insert(parts, comment_text(lines, lnum + 1, below))
+    return { signature = lines[lnum], doc = #parts > 0 and table.concat(parts, "\n\n") or nil }
 end
 
 -- Signature and documentation of the language function whose name is at

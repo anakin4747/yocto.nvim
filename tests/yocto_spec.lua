@@ -606,6 +606,34 @@ describe("bitbake file scanning", function()
             assert.are.same({ signature = "foo() {" }, doc_of({ "# License", "", "foo() {", "}" }))
             assert.are.same({ signature = "foo() {" }, doc_of({ "foo() {", "}" }))
         end)
+
+        it("returns the comment block at the top of the body", function()
+            assert.are.same({
+                signature = "foo () {",
+                doc = "Create a wrapper.\n\nUseful for relocation.\n\nUsage: foo FILE",
+            }, doc_of({
+                "foo () {",
+                "\t# Create a wrapper.",
+                "\t#",
+                "\t# Useful for relocation.",
+                "\t#",
+                "\t# Usage: foo FILE",
+                "",
+                "\tcmd=$1",
+                "}",
+            }))
+        end)
+
+        it("joins the comments above and at the top of the body", function()
+            assert.are.same(
+                { signature = "foo() {", doc = "Above.\n\nInside." },
+                doc_of({ "# Above.", "foo() {", "\t# Inside.", "\ttrue", "}" })
+            )
+        end)
+
+        it("ignores comments after code in the body", function()
+            assert.are.same({ signature = "foo() {" }, doc_of({ "foo() {", "\ttrue", "\t# later", "}" }))
+        end)
     end)
 
     describe("function_doc python", function()
