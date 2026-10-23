@@ -227,7 +227,7 @@ end
 -- still initializing are hidden from get_clients() and vim.lsp.enable(false)
 -- unless _uninitialized is passed; they would otherwise be reused later.
 local function stop_servers()
-    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", "user_zuban", unpack(DEFAULT_NAMES) }, false)
+    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", "user_bash", "user_zuban", unpack(DEFAULT_NAMES) }, false)
     for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
         client:stop(true)
     end
@@ -527,6 +527,163 @@ describe("range mapping", function()
     end)
 end)
 
+describe("bitbake file scanning", function()
+    local yocto = require("yocto")
+
+    local function range(sl, sc, el, ec)
+        return { start = pos(sl, sc), ["end"] = pos(el, ec) }
+    end
+
+    describe("find_function python", function()
+        it("finds the name of a python def", function()
+            local lines = { "X = '1'", "def foo(d):", "    pass" }
+            assert.are.same({ range(1, 4, 1, 7) }, yocto.find_function(lines, "foo", "python"))
+        end)
+
+        it("finds the name of a python task", function()
+            local lines = { "python foo () {", "}" }
+            assert.are.same({ range(0, 7, 0, 10) }, yocto.find_function(lines, "foo", "python"))
+        end)
+
+        it("returns nothing when the function is absent", function()
+            assert.are.same({}, yocto.find_function({ "def bar(d):" }, "foo", "python"))
+        end)
+
+        it("does not match a longer name", function()
+            assert.are.same({}, yocto.find_function({ "def foo2(d):" }, "foo", "python"))
+        end)
+    end)
+
+    describe("inherited_classes", function()
+        it("lists every class of an inherit line with its position", function()
+            assert.are.same({
+                { name = "foo", position = pos(1, 8) },
+                { name = "bar-baz", position = pos(1, 13) },
+            }, yocto.inherited_classes({ "X = '1'", "inherit foo  bar-baz" }))
+        end)
+
+        it("lists classes of inherit_defer lines", function()
+            assert.are.same(
+                { { name = "foo", position = pos(0, 14) } },
+                yocto.inherited_classes({ "inherit_defer foo" })
+            )
+        end)
+
+        it("ignores lines that only start with inherit", function()
+            assert.are.same({}, yocto.inherited_classes({ "inherited = 'foo'", "INHERIT += 'foo'" }))
+        end)
+    end)
+
+    describe("find_function bash", function()
+        it("finds shell function definitions", function()
+            assert.are.same({
+                range(0, 0, 0, 3),
+                range(1, 0, 1, 3),
+                range(2, 9, 2, 12),
+                range(3, 7, 3, 10),
+            }, yocto.find_function({ "foo() {", "foo () {", "fakeroot foo() {", "export foo() {" }, "foo", "bash"))
+        end)
+
+        it("does not mix up python and shell definitions", function()
+            assert.are.same({}, yocto.find_function({ "python foo () {", "def foo(d):" }, "foo", "bash"))
+            assert.are.same({}, yocto.find_function({ "foo() {" }, "foo", "python"))
+        end)
+    end)
+
+    describe("function_doc bash", function()
+        local function doc_of(lines)
+            return yocto.function_doc(lines, yocto.find_function(lines, "foo", "bash")[1], "bash")
+        end
+
+        it("returns the signature and the comment block above it", function()
+            assert.are.same(
+                { signature = "foo() {", doc = "Does foo.\nOutput: logs" },
+                doc_of({ "# License", "", "# Does foo.", "# Output: logs", "foo() {", "}" })
+            )
+        end)
+
+        it("returns only the signature without an adjacent comment", function()
+            assert.are.same({ signature = "foo() {" }, doc_of({ "# License", "", "foo() {", "}" }))
+            assert.are.same({ signature = "foo() {" }, doc_of({ "foo() {", "}" }))
+        end)
+    end)
+
+    describe("function_doc python", function()
+        local function doc_of(lines, name)
+            return yocto.function_doc(lines, yocto.find_function(lines, name, "python")[1], "python")
+        end
+
+        it("returns the signature and the dedented docstring", function()
+            assert.are.same({
+                signature = "def foo(d, x=None):",
+                doc = "Split packages.\n\nArguments:\n  x -- a value",
+            }, doc_of({
+                "def foo(d, x=None):",
+                '    """',
+                "    Split packages.",
+                "",
+                "    Arguments:",
+                "      x -- a value",
+                '    """',
+                "    pass",
+            }, "foo"))
+        end)
+
+        it("joins a wrapped signature", function()
+            assert.are.same(
+                { signature = "def foo(d,\n        x):" },
+                doc_of({ "def foo(d,", "        x):", "    pass" }, "foo")
+            )
+        end)
+
+        it("reads one-line and single-quoted docstrings", function()
+            assert.are.same(
+                { signature = "def foo(d):", doc = "One line." },
+                doc_of({ "def foo(d):", '    """One line."""' }, "foo")
+            )
+            assert.are.same(
+                { signature = "def foo(d):", doc = "Quoted." },
+                doc_of({ "def foo(d):", "    '''", "    Quoted.", "    '''" }, "foo")
+            )
+        end)
+
+        it("returns only the signature without a docstring", function()
+            assert.are.same({ signature = "def foo(d):" }, doc_of({ "def foo(d):", "    return 1" }, "foo"))
+        end)
+    end)
+
+    describe("bblayers", function()
+        it("lists the layers of a multi-line BBLAYERS with TOPDIR expanded", function()
+            assert.are.same({ "/p/sources/poky/meta", "/abs/meta-x" }, yocto.bblayers({
+                "# comment",
+                'BBLAYERS ?= " \\',
+                "  ${TOPDIR}/../sources/poky/meta \\",
+                "  /abs/meta-x \\",
+                '  "',
+            }, "/p/build"))
+        end)
+
+        it("appends BBLAYERS += entries", function()
+            assert.are.same(
+                { "/a", "/b" },
+                yocto.bblayers({ 'BBLAYERS = "/a"', 'BBLAYERS += "/b"' }, "/p/build")
+            )
+        end)
+
+        it("expands variables of the same file and skips unknown ones", function()
+            assert.are.same({ "/p/sources/meta-a" }, yocto.bblayers({
+                'BSPDIR := "${TOPDIR}/../sources"',
+                'BBLAYERS = "${BSPDIR}/meta-a ${OTHER}/meta-b ${@d.getVar(\'X\')}/meta-c"',
+            }, "/p/build"))
+        end)
+
+        it("ignores other variables and returns nothing for an empty file", function()
+            assert.are.same({}, yocto.bblayers({ 'BBPATH = "/x"', 'BBFILES ?= "/y"' }, "/p/build"))
+            assert.are.same({}, yocto.bblayers({}, "/p/build"))
+        end)
+    end)
+end)
+
 describe("embedded buffers", function()
     local yocto
 
@@ -646,29 +803,57 @@ describe("embedded proxy client", function()
         return { start = pos(sl, sc), ["end"] = pos(el, ec) }
     end
 
+    -- Embedded language of the current test, set by start_servers.
+    local embedded = "python"
+
     local function embedded_uri()
-        return yocto.get_embedded_uri(ORIG, "python")
+        return yocto.get_embedded_uri(ORIG, embedded)
     end
+
+    -- Embedded doc fixtures: fake server, filetype, embedded lines, indexes.
+    -- The bash recipe maps to its embedded doc unchanged.
+    local BASH_RECIPE = { "do_install() {", "    oe_runmake", "}" }
+    local BASH_INDEXES = {}
+    for o = 0, #table.concat(BASH_RECIPE, "\n") do
+        BASH_INDEXES[o + 1] = o
+    end
+    local FIXTURES = {
+        python = { server = "user_python", filetype = "python", lines = EMBEDDED, indexes = INDEXES },
+        bash = { server = "user_bash", filetype = "sh", lines = BASH_RECIPE, indexes = BASH_INDEXES },
+    }
 
     local MAPPED = range(1, 4, 1, 9) -- same in recipe and embedded doc
     local HEADER = range(0, 4, 0, 9) -- embedded "do_foo", recipe (0, 7)-(0, 12)
     local GENERATED = range(0, 0, 0, 3) -- embedded "def", no recipe text
     local OS_URI = "file:///usr/lib/python3/os.py"
 
-    -- Fake bitbake server reporting `language` everywhere, fake python server
-    -- answering hover with `hover`, and the do_foo fixture as embedded doc.
+    -- Fake bitbake server reporting `language` everywhere, fake server for
+    -- the `embedded` language (default python) answering hover with `hover`,
+    -- and that language's fixture as embedded doc.
     local function start_servers(opts)
         local python_messages = {}
-        vim.lsp.config("user_bitbake", {
-            cmd = fake_cmd(nil, {
-                handlers = {
+        embedded = opts.embedded or "python"
+        local fixture = FIXTURES[embedded]
+        if embedded == "bash" then
+            vim.api.nvim_buf_set_lines(recipe_buf, 0, -1, false, BASH_RECIPE)
+        end
+        if opts.recipe then
+            vim.api.nvim_buf_set_lines(recipe_buf, 0, -1, false, opts.recipe)
+        end
+        -- Assigned, not merged, so root and settings do not leak between tests.
+        vim.lsp.config["user_bitbake"] = {
+            cmd = fake_cmd(opts.bitbake_messages, {
+                capabilities = { definitionProvider = true },
+                handlers = vim.tbl_extend("force", {
                     ["bitbake/requestEmbeddedLanguageDocInfos"] = function()
                         return opts.language
                     end,
-                },
+                }, opts.bitbake_handlers or {}),
             }),
             filetypes = { "bitbake" },
-        })
+            root_dir = opts.bitbake_root,
+            settings = opts.bitbake_settings,
+        }
         vim.lsp.enable("user_bitbake")
         if opts.python ~= false then
             local handlers = {
@@ -706,7 +891,7 @@ describe("embedded proxy client", function()
                     })
                 end
             end
-            vim.lsp.config("user_python", {
+            vim.lsp.config[fixture.server] = {
                 cmd = fake_cmd(python_messages, {
                     capabilities = vim.tbl_extend("force", { hoverProvider = true }, opts.capabilities or {}),
                     handlers = handlers,
@@ -715,19 +900,19 @@ describe("embedded proxy client", function()
                         ["textDocument/didChange"] = publish,
                     },
                 }),
-                filetypes = { "python" },
-            })
-            vim.lsp.enable("user_python")
+                filetypes = { fixture.filetype },
+            }
+            vim.lsp.enable(fixture.server)
         end
 
         vim.bo[recipe_buf].filetype = "bitbake"
-        yocto.handler(nil, { doc("python", table.concat(EMBEDDED, "\n"), INDEXES) }, {})
-        local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(ORIG, "python")))
+        yocto.handler(nil, { doc(embedded, table.concat(fixture.lines, "\n"), fixture.indexes) }, {})
+        local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(embedded_uri()))
         vim.wait(500, function()
             return proxy_client() ~= nil
                 and #vim.lsp.get_clients({ bufnr = recipe_buf, name = "user_bitbake" }) == 1
                 and (opts.python == false
-                    or #vim.lsp.get_clients({ bufnr = embedded_buf, name = "user_python" }) == 1)
+                    or #vim.lsp.get_clients({ bufnr = embedded_buf, name = fixture.server }) == 1)
         end)
         return python_messages
     end
@@ -872,9 +1057,9 @@ describe("embedded proxy client", function()
             }, result)
         end)
 
-        it("drops locations in generated text", function()
+        it("returns nil when all locations are in generated text", function()
             local result = definition({ { uri = "EMBEDDED", range = GENERATED } })
-            assert.are.same({}, result)
+            assert.is_nil(result)
         end)
 
         it("maps location links", function()
@@ -894,6 +1079,222 @@ describe("embedded proxy client", function()
                     originSelectionRange = MAPPED,
                 },
             }, result)
+        end)
+    end)
+
+    describe("definition in inherited classes", function()
+        -- Recipe lines 0-2 are the do_foo fixture; "x" at (1, 4) is the word.
+        local INHERITING = { RECIPE[1], RECIPE[2], RECIPE[3], "inherit foo" }
+        local layer, bitbake_messages
+
+        before_each(function()
+            layer = vim.fn.tempname()
+            bitbake_messages = {}
+        end)
+
+        after_each(function()
+            vim.fn.delete(layer, "rf")
+        end)
+
+        -- Write a class file under the layer and return its uri.
+        local function write_class(dir, name, lines)
+            vim.fn.mkdir(layer .. "/" .. dir, "p")
+            local path = layer .. "/" .. dir .. "/" .. name .. ".bbclass"
+            vim.fn.writefile(lines, path)
+            return vim.uri_from_fname(path)
+        end
+
+        -- The fake bitbake server resolves the class at `inherit foo` to foo_uri.
+        local function definition(opts)
+            start_servers(vim.tbl_extend("force", {
+                language = "python",
+                recipe = INHERITING,
+                bitbake_messages = bitbake_messages,
+                capabilities = { definitionProvider = true },
+                results = { ["textDocument/definition"] = {} },
+                bitbake_handlers = {
+                    ["textDocument/definition"] = function(params)
+                        if params.position.line == 3 and params.position.character == 8 and opts.foo_uri then
+                            return { { uri = opts.foo_uri, range = range(0, 0, 0, 0) } }
+                        end
+                        return {}
+                    end,
+                },
+            }, opts))
+            return request(opts.method or "textDocument/definition", pos(1, 4))
+        end
+
+        it("finds a python function defined in an inherited class", function()
+            local foo_uri = write_class("classes-recipe", "foo", { "X = '1'", "def x(d):", "    pass" })
+            assert.are.same({ { uri = foo_uri, range = range(1, 4, 1, 5) } }, definition({ foo_uri = foo_uri }))
+        end)
+
+        it("does not search classes when the python server finds the definition", function()
+            local foo_uri = write_class("classes-recipe", "foo", { "def x(d):" })
+            local result = definition({
+                foo_uri = foo_uri,
+                results = { ["textDocument/definition"] = { uri = "EMBEDDED", range = MAPPED } },
+            })
+            assert.are.same({ uri = ORIG, range = MAPPED }, result)
+            assert.are.equal(0, #requests_for(bitbake_messages, "textDocument/definition"))
+        end)
+
+        it("returns nil when no inherited class defines the function", function()
+            local foo_uri = write_class("classes-recipe", "foo", { "def y(d):" })
+            assert.is_nil(definition({ foo_uri = foo_uri }))
+        end)
+
+        it("finds a python function in a class inherited by an inherited class", function()
+            local foo_uri = write_class("classes-recipe", "foo", { "inherit bar" })
+            local bar_uri = write_class("classes", "bar", { "def x(d):" })
+            assert.are.same({ { uri = bar_uri, range = range(0, 4, 0, 5) } }, definition({ foo_uri = foo_uri }))
+        end)
+
+        it("stops at classes that inherit each other", function()
+            local foo_uri = write_class("classes-recipe", "foo", { "inherit bar" })
+            write_class("classes-global", "bar", { "inherit foo" })
+            assert.is_nil(definition({ foo_uri = foo_uri }))
+        end)
+
+        describe("hover", function()
+            local ANY = { contents = { kind = "markdown", value = "```python\nx: Any\n```" } }
+
+            local function class_hover(opts)
+                return definition(vim.tbl_extend("force", { method = "textDocument/hover", hover = ANY }, opts))
+            end
+
+            it("shows the signature and docstring of a function defined in a class", function()
+                local foo_uri = write_class("classes-recipe", "foo", {
+                    "def x(d, y=None):",
+                    '    """',
+                    "    Does x.",
+                    '    """',
+                })
+                assert.are.same({
+                    contents = {
+                        kind = "markdown",
+                        value = "```python\ndef x(d, y=None):\n```\n\nDoes x.\n\n*foo.bbclass:1*",
+                    },
+                }, class_hover({ foo_uri = foo_uri }))
+            end)
+
+            it("keeps a python hover with content and does not search classes", function()
+                local foo_uri = write_class("classes-recipe", "foo", { "def x(d):" })
+                local own = { contents = { kind = "markdown", value = "```python\ndef x() -> int\n```\nDoc" } }
+                assert.are.same(own, class_hover({ foo_uri = foo_uri, hover = own }))
+                assert.are.equal(0, #requests_for(bitbake_messages, "textDocument/definition"))
+            end)
+
+            it("keeps the python hover when no class defines the function", function()
+                local foo_uri = write_class("classes-recipe", "foo", { "def y(d):" })
+                assert.are.same(ANY, class_hover({ foo_uri = foo_uri }))
+            end)
+        end)
+
+        describe("bash", function()
+            -- Recipe lines 0-2 are the do_install fixture; "oe_runmake" at (1, 4).
+            local function bash(opts)
+                return definition(vim.tbl_extend("force", {
+                    embedded = "bash",
+                    language = "bash",
+                    recipe = { "do_install() {", "    oe_runmake", "}", "inherit foo" },
+                    hover = vim.NIL,
+                }, opts))
+            end
+
+            it("finds a shell function defined in a class", function()
+                local foo_uri = write_class("classes-recipe", "foo", { "oe_runmake() {", "}" })
+                assert.are.same({ { uri = foo_uri, range = range(0, 0, 0, 10) } }, bash({ foo_uri = foo_uri }))
+            end)
+
+            it("shows the signature, comment and location of a shell function", function()
+                local foo_uri = write_class("classes-recipe", "foo", { "# Runs make.", "oe_runmake() {", "}" })
+                assert.are.same({
+                    contents = { kind = "markdown", value = "```sh\noe_runmake() {\n```\n\nRuns make.\n\n*foo.bbclass:2*" },
+                }, bash({ foo_uri = foo_uri, method = "textDocument/hover" }))
+            end)
+
+            it("keeps a bash hover with content and does not search classes", function()
+                local foo_uri = write_class("classes-recipe", "foo", { "oe_runmake() {", "}" })
+                local own = { contents = { kind = "markdown", value = "man page" } }
+                assert.are.same(own, bash({ foo_uri = foo_uri, hover = own, method = "textDocument/hover" }))
+                assert.are.equal(0, #requests_for(bitbake_messages, "textDocument/definition"))
+            end)
+        end)
+
+        describe("with a bblayers.conf", function()
+            -- `layer` is the project root; its build lists meta-a and meta-b.
+            local function write_bblayers(build)
+                vim.fn.mkdir(layer .. "/" .. build .. "/conf", "p")
+                vim.fn.writefile({
+                    'BBLAYERS ?= " \\',
+                    "  ${TOPDIR}/../meta-a \\",
+                    "  ${TOPDIR}/../meta-b \\",
+                    '  "',
+                }, layer .. "/" .. build .. "/conf/bblayers.conf")
+            end
+
+            local function global_definition(opts)
+                return definition(vim.tbl_extend("force", { recipe = RECIPE, bitbake_root = layer }, opts or {}))
+            end
+
+            it("finds a python function in a global class without inherit lines", function()
+                write_bblayers("build")
+                local g_uri = write_class("meta-b/classes-global", "g", { "def x(d):" })
+                assert.are.same({ { uri = g_uri, range = range(0, 4, 0, 5) } }, global_definition())
+            end)
+
+            it("finds the build folder above a client rooted in a layer repository", function()
+                write_bblayers("build")
+                vim.fn.mkdir(layer .. "/sources/openembedded-core/.git", "p")
+                local g_uri = write_class("meta-b/classes-global", "g", { "def x(d):" })
+                assert.are.same(
+                    { { uri = g_uri, range = range(0, 4, 0, 5) } },
+                    global_definition({ bitbake_root = layer .. "/sources/openembedded-core" })
+                )
+            end)
+
+            it("uses pathToBuildFolder from the bitbake settings", function()
+                write_bblayers("out")
+                local g_uri = write_class("meta-a/classes-global", "g", { "def x(d):" })
+                assert.are.same(
+                    { { uri = g_uri, range = range(0, 4, 0, 5) } },
+                    global_definition({
+                        bitbake_settings = { bitbake = { pathToBuildFolder = "${workspaceFolder}/out" } },
+                    })
+                )
+            end)
+
+            it("lists inherited classes before global classes", function()
+                write_bblayers("build")
+                local foo_uri = write_class("meta-a/classes-recipe", "foo", { "def x(d):" })
+                local g_uri = write_class("meta-a/classes-global", "g", { "def x(d):" })
+                assert.are.same({
+                    { uri = foo_uri, range = range(0, 4, 0, 5) },
+                    { uri = g_uri, range = range(0, 4, 0, 5) },
+                }, global_definition({ recipe = INHERITING, foo_uri = foo_uri }))
+            end)
+
+            it("follows inherits of global classes into other layers", function()
+                write_bblayers("build")
+                write_class("meta-a/classes-global", "g", { "inherit h" })
+                local h_uri = write_class("meta-b/classes", "h", { "def x(d):" })
+                assert.are.same({ { uri = h_uri, range = range(0, 4, 0, 5) } }, global_definition())
+            end)
+        end)
+
+        it("does not search classes for references", function()
+            write_class("classes-recipe", "foo", { "def x(d):" })
+            start_servers({
+                language = "python",
+                recipe = INHERITING,
+                bitbake_messages = bitbake_messages,
+                capabilities = { referencesProvider = true },
+                results = { ["textDocument/references"] = {} },
+            })
+            local result = request("textDocument/references", pos(1, 4), { context = { includeDeclaration = true } })
+            assert.are.same({}, result)
+            assert.are.equal(0, #requests_for(bitbake_messages, "textDocument/definition"))
         end)
     end)
 

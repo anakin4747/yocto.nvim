@@ -22,4 +22,5 @@ paths and correct "defined on line N" to the recipe's line numbers.
 
 ---
 
-python functions defined in classes do not work for go to definition
+Go to definition of python functions searches inherited classes and the
+classes-global of bblayers.conf layers: also search require/include files.

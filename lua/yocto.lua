@@ -3,7 +3,24 @@
 
 local M = {}
 
-local EXTENSIONS = { bash = ".sh", python = ".py" }
+-- Embedded languages: file extension and filetype of their docs, the
+-- characters of a function name and the patterns of function definitions in
+-- bitbake files, where "()" marks the start of the name and NAME stands for
+-- it. `doc` and `unresolved_hover` are set with the class search below.
+local LANGUAGES = {
+    bash = {
+        extension = ".sh",
+        filetype = "sh",
+        word = "[%w_%-]+",
+        definitions = { "^()NAME%s*%(%)%s*{", "^fakeroot%s+()NAME%s*%(%)%s*{", "^export%s+()NAME%s*%(%)%s*{" },
+    },
+    python = {
+        extension = ".py",
+        filetype = "python",
+        word = "[%w_]+",
+        definitions = { "^def%s+()NAME%s*%(", "^python%s+()NAME%s*%(" },
+    },
+}
 
 -- Inside Neovim's per-session temp directory, which Neovim deletes on exit.
 M.storage_dir = vim.fn.tempname()
@@ -18,10 +35,8 @@ function M.project_dir(original_uri)
 end
 
 local function path_for(original_uri, language)
-    return vim.fs.joinpath(M.project_dir(original_uri), vim.fn.sha256(original_uri) .. EXTENSIONS[language])
+    return vim.fs.joinpath(M.project_dir(original_uri), vim.fn.sha256(original_uri) .. LANGUAGES[language].extension)
 end
-
-local FILETYPES = { bash = "sh", python = "python" }
 
 -- Copy of an enabled python config rooted at the project directory, with the
 -- project's bitbake python paths for pyright/basedpyright (settings) and for
@@ -77,14 +92,14 @@ local function sync_buffer(path, lines, language, original_uri)
         vim.bo[bufnr].buftype = "nowrite"
     end
     vim.fn.bufload(bufnr)
-    vim.bo[bufnr].filetype = FILETYPES[language]
+    vim.bo[bufnr].filetype = LANGUAGES[language].filetype
     if language == "python" then
         start_python_servers(bufnr, original_uri)
     end
 end
 
 local function save(doc)
-    if not EXTENSIONS[doc.language] then
+    if not LANGUAGES[doc.language] then
         return
     end
     local path = path_for(doc.originalUri, doc.language)
@@ -113,7 +128,7 @@ function M.handler(err, result, _ctx)
 end
 
 function M.get_embedded_uri(original_uri, language)
-    if not EXTENSIONS[language] then
+    if not LANGUAGES[language] then
         return nil
     end
     local uri = vim.uri_from_fname(path_for(original_uri, language))
@@ -314,6 +329,153 @@ end
 
 function M.to_original_range(...)
     return map_range(M.to_original_position, ...)
+end
+
+-- Ranges of `name` where lines define it as a function of language.
+function M.find_function(lines, name, language)
+    local ranges = {}
+    local escaped = vim.pesc(name):gsub("%%", "%%%%")
+    for lnum, line in ipairs(lines) do
+        for _, pattern in ipairs(LANGUAGES[language].definitions) do
+            local prefix = line:match((pattern:gsub("NAME", escaped)))
+            if prefix then
+                local first = prefix - 1
+                table.insert(ranges, {
+                    start = { line = lnum - 1, character = first },
+                    ["end"] = { line = lnum - 1, character = first + #name },
+                })
+                break
+            end
+        end
+    end
+    return ranges
+end
+
+-- Lines without their common indentation and surrounding blank lines.
+local function dedent(lines)
+    local indent
+    for _, line in ipairs(lines) do
+        if line:find("%S") then
+            local width = #line:match("^%s*")
+            indent = indent and math.min(indent, width) or width
+        end
+    end
+    local result = vim.tbl_map(function(line)
+        return line:sub((indent or 0) + 1)
+    end, lines)
+    while result[1] == "" do
+        table.remove(result, 1)
+    end
+    while result[#result] == "" do
+        table.remove(result)
+    end
+    return table.concat(result, "\n")
+end
+
+-- Signature and docstring of a python function whose definition starts at
+-- line lnum.
+local function python_doc(lines, lnum)
+    local signature = { lines[lnum] }
+    while not lines[lnum]:match("[:{]%s*$") and lines[lnum + 1] do
+        lnum = lnum + 1
+        table.insert(signature, lines[lnum])
+    end
+    local doc = { signature = table.concat(signature, "\n") }
+
+    local first = lines[lnum + 1] and lines[lnum + 1]:match("^%s*(.*)$")
+    local quote = first and (first:match('^"""') or first:match("^'''"))
+    if not quote then
+        return doc
+    end
+    local rest = first:sub(4)
+    local closing = rest:find(quote, 1, true)
+    if closing then
+        doc.doc = vim.trim(rest:sub(1, closing - 1))
+        return doc
+    end
+    local body = { rest }
+    for i = lnum + 2, #lines do
+        closing = lines[i]:find(quote, 1, true)
+        if closing then
+            table.insert(body, lines[i]:sub(1, closing - 1))
+            break
+        end
+        table.insert(body, lines[i])
+    end
+    -- The text after the opening quotes is not indented like the rest.
+    local head = vim.trim(table.remove(body, 1))
+    local text = dedent(body)
+    doc.doc = head ~= "" and (head .. (text ~= "" and "\n" .. text or "")) or text
+    return doc
+end
+LANGUAGES.python.doc = python_doc
+
+-- Signature and the comment block right above a shell function whose
+-- definition is at line lnum.
+LANGUAGES.bash.doc = function(lines, lnum)
+    local comment = {}
+    for i = lnum - 1, 1, -1 do
+        local text = lines[i]:match("^%s*#%s?(.*)$")
+        if not text then
+            break
+        end
+        table.insert(comment, 1, text)
+    end
+    return { signature = lines[lnum], doc = #comment > 0 and table.concat(comment, "\n") or nil }
+end
+
+-- Signature and documentation of the language function whose name is at
+-- range in lines, as found by find_function.
+function M.function_doc(lines, range, language)
+    return LANGUAGES[language].doc(lines, range.start.line + 1)
+end
+
+-- Classes named on `inherit` and `inherit_defer` lines, with the position of
+-- each name.
+function M.inherited_classes(lines)
+    local classes = {}
+    for lnum, line in ipairs(lines) do
+        local rest = line:match("^inherit_defer%s+()") or line:match("^inherit%s+()")
+        if rest then
+            for col, name in line:sub(rest):gmatch("()(%S+)") do
+                table.insert(classes, {
+                    name = name,
+                    position = { line = lnum - 1, character = rest + col - 2 },
+                })
+            end
+        end
+    end
+    return classes
+end
+
+-- Layer directories listed in the BBLAYERS of a bblayers.conf, with ${TOPDIR}
+-- and variables assigned in the same file expanded. Entries left with
+-- variables bitbake would have to evaluate are skipped.
+function M.bblayers(lines, topdir)
+    local text = table.concat(lines, "\n"):gsub("\\\n", " ")
+    local vars, layers = { TOPDIR = topdir }, {}
+    local function expand(value)
+        return (value:gsub("%${([%w_]+)}", function(name)
+            return vars[name]
+        end))
+    end
+    for line in vim.gsplit(text, "\n") do
+        local name, op, value = line:match("^%s*([%w_]+)%s*([%?:%+]*=)%s*[\"'](.-)[\"']%s*$")
+        if name == "BBLAYERS" then
+            if op ~= "+=" then
+                layers = {}
+            end
+            for entry in value:gmatch("%S+") do
+                local path = expand(entry)
+                if not path:find("${", 1, true) then
+                    table.insert(layers, vim.fs.normalize(path))
+                end
+            end
+        elseif name and op ~= "+=" then
+            vars[name] = expand(value)
+        end
+    end
+    return layers
 end
 
 -- In-process language server that forwards requests on bitbake buffers to the
@@ -517,6 +679,208 @@ for _, forwarded in pairs(FORWARDED) do
     PROXY_CAPABILITIES = vim.tbl_extend("force", PROXY_CAPABILITIES, forwarded.capability or {})
 end
 
+local function is_empty(result)
+    return result == nil or result == vim.NIL or (vim.islist(result) and #result == 0)
+end
+
+-- Identifier made of word characters at an LSP position of a line, or nil.
+local function word_at(line, character, word)
+    local col = vim.str_byteindex(line, "utf-16", math.min(character, vim.str_utfindex(line, "utf-16")), false) + 1
+    for first, match, last in line:gmatch("()(" .. word .. ")()") do
+        if col >= first and col <= last then
+            return match
+        end
+    end
+end
+
+-- Class directories of a layer, in bitbake's search order.
+local CLASS_DIRS = { "classes-recipe", "classes-global", "classes" }
+
+local function layer_of(class_uri)
+    return vim.fs.dirname(vim.fs.dirname(vim.uri_to_fname(class_uri)))
+end
+
+-- Layers listed in the bblayers.conf of the bitbake client's build folder
+-- (bitbake.pathToBuildFolder, by default <project>/build), or {}. The client
+-- root may be a layer's own git repository, so ${workspaceFolder} is the
+-- Yocto project above it when there is one.
+local function configured_layers(bitbake)
+    local root = bitbake.root_dir and (M.project_root(bitbake.root_dir) or bitbake.root_dir)
+    if not root then
+        return {}
+    end
+    local build = vim.tbl_get(bitbake.settings or {}, "bitbake", "pathToBuildFolder") or "${workspaceFolder}/build"
+    build = vim.fs.normalize((build:gsub("%${workspaceFolder}", root)))
+    local ok, lines = pcall(vim.fn.readfile, build .. "/conf/bblayers.conf")
+    return ok and M.bblayers(lines, build) or {}
+end
+
+-- Uris of the classes in the classes-global directories of layers, which
+-- INHERIT may have added to any recipe.
+local function global_classes(layers)
+    local uris = {}
+    for _, layer in ipairs(layers) do
+        local dir = layer .. "/classes-global"
+        local files = {}
+        for file, type in vim.fs.dir(dir) do
+            if type == "file" and file:match("%.bbclass$") then
+                table.insert(files, file)
+            end
+        end
+        table.sort(files)
+        for _, file in ipairs(files) do
+            table.insert(uris, vim.uri_from_fname(dir .. "/" .. file))
+        end
+    end
+    return uris
+end
+
+-- Path of the first file for class `name` in the class directories of
+-- layers, or nil.
+local function find_class(layers, name)
+    for _, layer in ipairs(layers) do
+        for _, dir in ipairs(CLASS_DIRS) do
+            local path = layer .. "/" .. dir .. "/" .. name .. ".bbclass"
+            if vim.uv.fs_stat(path) then
+                return path
+            end
+        end
+    end
+end
+
+-- Locations defining function `name` of language in the given classes and,
+-- through their inherit lines, the classes they inherit from layers.
+local function find_in_classes(class_uris, layers, name, language)
+    local locations, visited = {}, {}
+    local queue = vim.deepcopy(class_uris)
+    while #queue > 0 do
+        local uri = table.remove(queue, 1)
+        local class = vim.fn.fnamemodify(vim.uri_to_fname(uri), ":t:r")
+        if not visited[class] then
+            visited[class] = true
+            local lines = uri_lines(uri)
+            for _, range in ipairs(M.find_function(lines, name, language)) do
+                table.insert(locations, { uri = uri, range = range })
+            end
+            for _, inherited in ipairs(M.inherited_classes(lines)) do
+                local path = not visited[inherited.name] and find_class(layers, inherited.name)
+                if path then
+                    table.insert(queue, vim.uri_from_fname(path))
+                end
+            end
+        end
+    end
+    return locations
+end
+
+-- Call callback with the locations defining the language function under
+-- position in the classes inherited by the recipe, which the bitbake server
+-- resolves to their files, and in the global classes of the layers of
+-- bblayers.conf.
+local function search_classes(bitbake, recipe_buf, position, language, callback)
+    local lines = buf_lines(recipe_buf)
+    local name = word_at(lines[position.line + 1] or "", position.character, LANGUAGES[language].word)
+    if not name then
+        return callback({})
+    end
+    local classes = M.inherited_classes(lines)
+    local recipe_uri = vim.uri_from_bufnr(recipe_buf)
+    local class_uris, pending = {}, #classes
+    local function done()
+        local roots, layers = {}, configured_layers(bitbake)
+        for i = 1, #classes do
+            if class_uris[i] then
+                table.insert(roots, class_uris[i])
+                local layer = layer_of(class_uris[i])
+                if not vim.list_contains(layers, layer) then
+                    table.insert(layers, layer)
+                end
+            end
+        end
+        vim.list_extend(roots, global_classes(layers))
+        callback(find_in_classes(roots, layers, name, language))
+    end
+    if pending == 0 then
+        return done()
+    end
+    for i, class in ipairs(classes) do
+        bitbake:request("textDocument/definition", {
+            textDocument = { uri = recipe_uri },
+            position = class.position,
+        }, function(err, result)
+            if not err and not is_empty(result) then
+                local location = result[1] or result
+                class_uris[i] = location.uri or location.targetUri
+            end
+            pending = pending - 1
+            if pending == 0 then
+                done()
+            end
+        end, recipe_buf)
+    end
+end
+
+-- Text of all contents of a hover result.
+local function hover_text(result)
+    if is_empty(result) then
+        return ""
+    end
+    local contents = result.contents
+    if type(contents) == "string" or contents.value then
+        contents = { contents }
+    end
+    return table.concat(vim.tbl_map(function(item)
+        return type(item) == "string" and item or item.value or ""
+    end, contents), "\n")
+end
+
+-- Whether a python hover carries nothing beyond an unknown `name: Any`.
+LANGUAGES.python.unresolved_hover = function(result)
+    local text = vim.trim(hover_text(result))
+    return text == "" or text:match("^```python%s+[%w_]+: Any%s+```$") ~= nil or text:match("^[%w_]+: Any$") ~= nil
+end
+
+-- Whether a bash hover is empty.
+LANGUAGES.bash.unresolved_hover = function(result)
+    return vim.trim(hover_text(result)) == ""
+end
+
+-- Hover with the signature and documentation of a class location.
+local function class_hover(location, language)
+    local doc = M.function_doc(uri_lines(location.uri), location.range, language)
+    local parts = { "```" .. LANGUAGES[language].filetype .. "\n" .. doc.signature .. "\n```" }
+    if doc.doc then
+        table.insert(parts, doc.doc)
+    end
+    local file = vim.fs.basename(vim.uri_to_fname(location.uri))
+    table.insert(parts, ("*%s:%d*"):format(file, location.range.start.line + 1))
+    return { contents = { kind = "markdown", value = table.concat(parts, "\n\n") } }
+end
+
+-- Whether the embedded server left a result of method unresolved, so the
+-- classes should be searched.
+local function unresolved(method, result, language)
+    local spec = LANGUAGES[language]
+    if not spec or not spec.doc then
+        return false
+    elseif method == "textDocument/definition" then
+        return is_empty(result)
+    elseif method == "textDocument/hover" then
+        return spec.unresolved_hover(result)
+    end
+    return false
+end
+
+-- Replace an unresolved result of method with what the classes define.
+local function from_classes(method, result, bitbake, recipe_buf, position, language, reply)
+    search_classes(bitbake, recipe_buf, position, language, function(locations)
+        if #locations == 0 then
+            return reply(nil, method == "textDocument/hover" and result or nil)
+        end
+        reply(nil, method == "textDocument/hover" and class_hover(locations[1], language) or locations)
+    end)
+end
+
 -- Ask the bitbake server which embedded language is at params.position,
 -- map the request into that embedded doc and send it to its language server.
 local function forward(method, params, reply)
@@ -559,6 +923,9 @@ local function forward(method, params, reply)
             local map = FORWARDED[method].map
             if result and result ~= vim.NIL and map then
                 result = map(result, embedded_uri)
+            end
+            if not err2 and unresolved(method, result, language) then
+                return from_classes(method, result, bitbake, recipe_buf, params.position, language, reply)
             end
             reply(err2, result)
         end, embedded_buf)
