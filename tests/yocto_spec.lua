@@ -783,3 +783,75 @@ describe("default storage_dir", function()
         assert.are.equal(session_tmp, vim.fs.dirname(storage_dir))
     end)
 end)
+
+describe("with real language servers", function()
+    local yocto, dir, recipe_buf, recipe_uri
+
+    local REAL_RECIPE = {
+        'SUMMARY = "foo"',
+        "do_install() {",
+        "    echo hi",
+        "}",
+        "python do_foo() {",
+        "    import os",
+        "    os.getcwd()",
+        "}",
+    }
+
+    local function proxy_hover(position)
+        local proxy = vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded" })[1]
+        local response = proxy:request_sync(
+            "textDocument/hover",
+            { textDocument = { uri = recipe_uri }, position = position },
+            5000,
+            recipe_buf
+        )
+        return response and response.result
+    end
+
+    -- Language servers may answer nothing until they finished indexing.
+    local function eventual_hover(position)
+        local result
+        vim.wait(30000, function()
+            result = proxy_hover(position)
+            return result ~= nil
+        end, 500)
+        return result
+    end
+
+    before_each(function()
+        yocto = require("yocto")
+        yocto.storage_dir = vim.fn.tempname()
+        dir = vim.fn.tempname()
+        vim.fn.mkdir(dir, "p")
+        local path = vim.fs.joinpath(dir, "foo_1.0.bb")
+        vim.fn.writefile(REAL_RECIPE, path)
+        recipe_uri = vim.uri_from_fname(path)
+        recipe_buf = vim.fn.bufadd(path)
+        vim.fn.bufload(recipe_buf)
+        assert.are.equal("bitbake", vim.bo[recipe_buf].filetype)
+        assert.is_true((vim.wait(30000, function()
+            return yocto.get_embedded_uri(recipe_uri, "bash") ~= nil
+                and yocto.get_embedded_uri(recipe_uri, "python") ~= nil
+        end, 100)))
+    end)
+
+    after_each(function()
+        stop_servers()
+        remove_storage(yocto.storage_dir)
+        vim.api.nvim_buf_delete(recipe_buf, { force = true })
+        vim.fn.delete(dir, "rf")
+    end)
+
+    it("hovers bash code through bash-language-server", function()
+        local result = eventual_hover(pos(2, 5))
+        assert.is_not_nil(result)
+        assert.is_not_nil(result.contents)
+    end)
+
+    it("hovers python code through pyright", function()
+        local result = eventual_hover(pos(6, 5))
+        assert.is_not_nil(result)
+        assert.is_not_nil(result.contents)
+    end)
+end)
