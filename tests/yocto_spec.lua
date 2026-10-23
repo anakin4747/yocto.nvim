@@ -974,3 +974,47 @@ describe("bitbake project settings", function()
         )
     end)
 end)
+
+-- Build a temporary directory tree; returns its root and a writer for it.
+local function temp_tree()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    return root, function(relpath, lines)
+        local path = vim.fs.joinpath(root, relpath)
+        vim.fn.mkdir(vim.fs.dirname(path), "p")
+        vim.fn.writefile(lines or {}, path)
+        return path
+    end
+end
+
+describe("project_root", function()
+    local yocto = require("yocto")
+    local root, write
+
+    before_each(function()
+        root, write = temp_tree()
+    end)
+
+    after_each(function()
+        vim.fn.delete(root, "rf")
+    end)
+
+    for _, marker in ipairs({ ".vscode", "sources", "layers", "build" }) do
+        it("finds the directory containing " .. marker, function()
+            vim.fn.mkdir(vim.fs.joinpath(root, marker), "p")
+            local recipe = write("meta-foo/recipes-foo/foo/foo_1.0.bb")
+            assert.are.equal(root, yocto.project_root(recipe))
+        end)
+    end
+
+    it("uses the nearest directory containing any marker", function()
+        vim.fn.mkdir(vim.fs.joinpath(root, "sources"), "p")
+        vim.fn.mkdir(vim.fs.joinpath(root, "poky", "build"), "p")
+        local recipe = write("poky/meta/recipes-foo/foo/foo_1.0.bb")
+        assert.are.equal(vim.fs.joinpath(root, "poky"), yocto.project_root(recipe))
+    end)
+
+    it("returns nil outside a project", function()
+        assert.is_nil(yocto.project_root(write("foo_1.0.bb")))
+    end)
+end)

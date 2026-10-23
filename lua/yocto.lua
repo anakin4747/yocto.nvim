@@ -78,6 +78,11 @@ end
 -- Same default as the vscode-bitbake extension.
 local DEFAULT_BITBAKE_SETTINGS = { pathToBitbakeFolder = "${workspaceFolder}/sources/poky/bitbake" }
 
+-- Top directory of the Yocto project containing path, or nil.
+function M.project_root(path)
+    return vim.fs.root(path, { { ".vscode", "sources", "layers", "build" } })
+end
+
 -- bitbake.* settings from <root>/.vscode/settings.json, accepting both
 -- "bitbake.key" and nested "bitbake": { key } forms. VS Code allows
 -- comments and trailing commas in that file.
