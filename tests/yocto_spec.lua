@@ -25,12 +25,11 @@ describe("embedded language docs handler", function()
     before_each(function()
         dir = vim.fn.tempname()
         docs = require("yocto")
-        docs._reset()
-        docs.setup({ storage_dir = dir })
+        docs.storage_dir = dir
     end)
 
     after_each(function()
-        vim.fn.delete(dir, "rf")
+        docs.cleanup()
     end)
 
     it("writes a .sh file for a bash doc", function()

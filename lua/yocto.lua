@@ -5,22 +5,12 @@ local M = {}
 
 local EXTENSIONS = { bash = ".sh", python = ".py" }
 
-local storage_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "yocto", "embedded-documents")
+M.storage_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "yocto", "embedded-documents")
+
 local infos = {} -- embedded_uri -> { original_uri, language, character_indexes }
 
-function M.setup(opts)
-    opts = opts or {}
-    if opts.storage_dir then
-        storage_dir = opts.storage_dir
-    end
-end
-
-function M._reset()
-    infos = {}
-end
-
 local function path_for(original_uri, language)
-    return vim.fs.joinpath(storage_dir, vim.fn.sha256(original_uri) .. EXTENSIONS[language])
+    return vim.fs.joinpath(M.storage_dir, vim.fn.sha256(original_uri) .. EXTENSIONS[language])
 end
 
 local function reload_buffer(path)
@@ -36,7 +26,7 @@ local function save(doc)
     if not EXTENSIONS[doc.language] then
         return
     end
-    vim.fn.mkdir(storage_dir, "p")
+    vim.fn.mkdir(M.storage_dir, "p")
     local path = path_for(doc.originalUri, doc.language)
     vim.fn.writefile(vim.split(doc.content, "\n", { plain = true }), path)
     reload_buffer(path)
@@ -72,7 +62,7 @@ function M.get_info(embedded_uri)
 end
 
 function M.cleanup()
-    vim.fn.delete(storage_dir, "rf")
+    vim.fn.delete(M.storage_dir, "rf")
     infos = {}
 end
 
