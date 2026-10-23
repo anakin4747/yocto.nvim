@@ -855,3 +855,122 @@ describe("with real language servers", function()
         assert.is_not_nil(result.contents)
     end)
 end)
+
+describe("bitbake project settings", function()
+    local yocto, root, recipe_buf, messages
+
+    -- Create files relative to the project root.
+    local function write(relpath, lines)
+        local path = vim.fs.joinpath(root, relpath)
+        vim.fn.mkdir(vim.fs.dirname(path), "p")
+        vim.fn.writefile(lines, path)
+        return path
+    end
+
+    local function open_recipe()
+        local path = write("sources/meta-foo/recipes-foo/foo/foo_1.0.bb", { 'SUMMARY = "foo"' })
+        recipe_buf = vim.fn.bufadd(path)
+        vim.fn.bufload(recipe_buf)
+        vim.wait(1000, function()
+            return #vim.tbl_filter(function(m)
+                return m.method == "workspace/didChangeConfiguration"
+            end, messages) > 0
+        end)
+    end
+
+    local function sent(method)
+        for _, m in ipairs(messages) do
+            if m.method == method then
+                return m.params
+            end
+        end
+    end
+
+    before_each(function()
+        yocto = require("yocto")
+        yocto.storage_dir = vim.fn.tempname()
+        root = vim.fn.tempname()
+        vim.fn.mkdir(root, "p")
+        messages = {}
+        vim.lsp.config("yocto_bitbake", { cmd = fake_cmd(messages) })
+    end)
+
+    after_each(function()
+        stop_servers()
+        vim.lsp.config.yocto_bitbake = {}
+        yocto.register_defaults()
+        remove_storage(yocto.storage_dir)
+        if recipe_buf then
+            vim.api.nvim_buf_delete(recipe_buf, { force = true })
+        end
+        vim.fn.delete(root, "rf")
+    end)
+
+    it("uses the directory containing sources as workspace folder", function()
+        open_recipe()
+        assert.are.equal(vim.uri_from_fname(root), sent("initialize").workspaceFolders[1].uri)
+    end)
+
+    it("prefers the directory containing .vscode as workspace folder", function()
+        write("sources/.vscode/settings.json", { "{}" })
+        open_recipe()
+        assert.are.equal(
+            vim.uri_from_fname(vim.fs.joinpath(root, "sources")),
+            sent("initialize").workspaceFolders[1].uri
+        )
+    end)
+
+    it("defaults pathToBitbakeFolder like the vscode extension", function()
+        open_recipe()
+        assert.are.equal(
+            "${workspaceFolder}/sources/poky/bitbake",
+            sent("workspace/didChangeConfiguration").settings.bitbake.pathToBitbakeFolder
+        )
+    end)
+
+    it("sends bitbake settings from the project .vscode/settings.json", function()
+        write(".vscode/settings.json", {
+            "{",
+            "  // comments and trailing commas are allowed by vscode",
+            '  "bitbake.pathToBitbakeFolder": "${workspaceFolder}/poky/bitbake",',
+            '  "bitbake.loggingLevel": "debug",',
+            '  "editor.tabSize": 4,',
+            "}",
+        })
+        open_recipe()
+        local settings = sent("workspace/didChangeConfiguration").settings
+        assert.are.same({
+            pathToBitbakeFolder = "${workspaceFolder}/poky/bitbake",
+            loggingLevel = "debug",
+        }, settings.bitbake)
+        assert.is_nil(settings.editor)
+    end)
+
+    it("accepts nested bitbake settings in .vscode/settings.json", function()
+        write(".vscode/settings.json", { '{ "bitbake": { "pathToBitbakeFolder": "/opt/bitbake" } }' })
+        open_recipe()
+        assert.are.equal(
+            "/opt/bitbake",
+            sent("workspace/didChangeConfiguration").settings.bitbake.pathToBitbakeFolder
+        )
+    end)
+
+    it("ignores an invalid .vscode/settings.json", function()
+        write(".vscode/settings.json", { "{ not json" })
+        open_recipe()
+        assert.are.equal(
+            "${workspaceFolder}/sources/poky/bitbake",
+            sent("workspace/didChangeConfiguration").settings.bitbake.pathToBitbakeFolder
+        )
+    end)
+
+    it("keeps settings from vim.lsp.config over the project file", function()
+        vim.lsp.config("yocto_bitbake", { settings = { bitbake = { loggingLevel = "info" } } })
+        write(".vscode/settings.json", { '{ "bitbake.loggingLevel": "debug" }' })
+        open_recipe()
+        assert.are.equal(
+            "info",
+            sent("workspace/didChangeConfiguration").settings.bitbake.loggingLevel
+        )
+    end)
+end)

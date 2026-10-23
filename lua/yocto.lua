@@ -75,8 +75,54 @@ function M.get_info(embedded_uri)
     return infos[embedded_uri]
 end
 
+-- Same default as the vscode-bitbake extension.
+local DEFAULT_BITBAKE_SETTINGS = { pathToBitbakeFolder = "${workspaceFolder}/sources/poky/bitbake" }
+
+-- bitbake.* settings from <root>/.vscode/settings.json, accepting both
+-- "bitbake.key" and nested "bitbake": { key } forms. VS Code allows
+-- comments and trailing commas in that file.
+local function read_vscode_bitbake_settings(root)
+    local path = vim.fs.joinpath(root, ".vscode", "settings.json")
+    local ok, lines = pcall(vim.fn.readfile, path)
+    if not ok or #lines == 0 then
+        return {}
+    end
+    local text = table.concat(lines, "\n"):gsub(",(%s*[}%]])", "%1")
+    local decoded_ok, decoded = pcall(vim.json.decode, text, { skip_comments = true })
+    if not decoded_ok or type(decoded) ~= "table" then
+        return {}
+    end
+    local settings = type(decoded.bitbake) == "table" and decoded.bitbake or {}
+    for key, value in pairs(decoded) do
+        local name = type(key) == "string" and key:match("^bitbake%.(.+)$")
+        if name then
+            settings[name] = value
+        end
+    end
+    return settings
+end
+
+-- Settings are applied in place: the client shares this settings table and
+-- sends it in workspace/didChangeConfiguration after initialization.
+local function bitbake_before_init(_, config)
+    config.settings = config.settings or {}
+    local project = config.root_dir and read_vscode_bitbake_settings(config.root_dir) or {}
+    config.settings.bitbake = vim.tbl_deep_extend(
+        "force",
+        DEFAULT_BITBAKE_SETTINGS,
+        project,
+        config.settings.bitbake or {}
+    )
+end
+
 local DEFAULT_CONFIGS = {
-    yocto_bitbake = { cmd = { "language-server-bitbake", "--stdio" }, filetypes = { "bitbake" } },
+    yocto_bitbake = {
+        cmd = { "language-server-bitbake", "--stdio" },
+        filetypes = { "bitbake" },
+        root_markers = { ".vscode", "sources", ".git" },
+        settings = {},
+        before_init = bitbake_before_init,
+    },
     yocto_bash = { cmd = { "bash-language-server", "start" }, filetypes = { "sh" } },
     yocto_python = { cmd = { "pyright-langserver", "--stdio" }, filetypes = { "python" } },
 }
