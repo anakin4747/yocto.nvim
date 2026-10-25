@@ -177,6 +177,27 @@ local function pos(line, character)
     return { line = line, character = character }
 end
 
+local function range(sl, sc, el, ec)
+    return { start = pos(sl, sc), ["end"] = pos(el, ec) }
+end
+
+local function proxy_client(bufnr)
+    return vim.lsp.get_clients({ bufnr = bufnr, name = "yocto_embedded" })[1]
+end
+
+-- Sends method at position on the recipe in bufnr through its proxy client.
+local function proxy_request(bufnr, method, position, extra)
+    local proxy = proxy_client(bufnr)
+    assert.is_not_nil(proxy, "no proxy client for buffer " .. bufnr)
+    local params = vim.tbl_extend(
+        "force",
+        { textDocument = { uri = vim.uri_from_bufnr(bufnr) }, position = position },
+        extra or {}
+    )
+    local response = proxy:request_sync(method, params, 500, bufnr)
+    return response and response.result
+end
+
 -- Build a temporary directory tree; returns its root and a writer for it.
 local function temp_tree()
     local root = vim.fn.tempname()
@@ -575,10 +596,6 @@ end)
 describe("range mapping", function()
     local yocto = require("yocto")
 
-    local function range(sl, sc, el, ec)
-        return { start = pos(sl, sc), ["end"] = pos(el, ec) }
-    end
-
     it("maps an original range to the embedded document", function()
         assert.are.same(
             range(0, 4, 0, 9),
@@ -604,10 +621,6 @@ end)
 
 describe("bitbake file scanning", function()
     local yocto = require("yocto")
-
-    local function range(sl, sc, el, ec)
-        return { start = pos(sl, sc), ["end"] = pos(el, ec) }
-    end
 
     describe("find_function python", function()
         it("finds the name of a python def", function()
@@ -884,10 +897,6 @@ end)
 describe("embedded proxy client", function()
     local yocto, recipe_buf
 
-    local function proxy_client()
-        return vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded" })[1]
-    end
-
     before_each(function()
         yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
@@ -901,10 +910,6 @@ describe("embedded proxy client", function()
         remove_storage(yocto.storage_dir)
         vim.api.nvim_buf_delete(recipe_buf, { force = true })
     end)
-
-    local function range(sl, sc, el, ec)
-        return { start = pos(sl, sc), ["end"] = pos(el, ec) }
-    end
 
     -- Embedded language of the current test, set by start_servers.
     local embedded = "python"
@@ -1012,29 +1017,12 @@ describe("embedded proxy client", function()
         yocto.handler(nil, { doc(embedded, table.concat(fixture.lines, "\n"), fixture.indexes) }, {})
         local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(embedded_uri()))
         vim.wait(500, function()
-            return proxy_client() ~= nil
+            return proxy_client(recipe_buf) ~= nil
                 and #vim.lsp.get_clients({ bufnr = recipe_buf, name = "user_bitbake" }) == 1
                 and (opts.python == false
                     or #vim.lsp.get_clients({ bufnr = embedded_buf, name = fixture.server }) == 1)
         end)
         return python_messages
-    end
-
-    local function hover(position)
-        local response = proxy_client():request_sync(
-            "textDocument/hover",
-            { textDocument = { uri = ORIG }, position = position },
-            500,
-            recipe_buf
-        )
-        return response and response.result
-    end
-
-    -- Send method at position on the recipe through the proxy.
-    local function request(method, position, extra)
-        local params = vim.tbl_extend("force", { textDocument = { uri = ORIG }, position = position }, extra or {})
-        local response = proxy_client():request_sync(method, params, 500, recipe_buf)
-        return response and response.result
     end
 
     local function requests_for(messages, method)
@@ -1045,12 +1033,12 @@ describe("embedded proxy client", function()
 
     it("advertises hover support", function()
         start_servers({ language = "python" })
-        assert.is_true(proxy_client():supports_method("textDocument/hover"))
+        assert.is_true(proxy_client(recipe_buf):supports_method("textDocument/hover"))
     end)
 
     it("forwards hover to the embedded server at the mapped position", function()
         local messages = start_servers({ language = "python", hover = { contents = "doc" } })
-        hover(pos(0, 7))
+        proxy_request(recipe_buf, "textDocument/hover", pos(0, 7))
         local requests = requests_for(messages, "textDocument/hover")
         assert.are.equal(1, #requests)
         assert.are.same({
@@ -1061,7 +1049,7 @@ describe("embedded proxy client", function()
 
     it("returns the hover contents of the embedded server", function()
         start_servers({ language = "python", hover = { contents = "doc" } })
-        assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
+        assert.are.same({ contents = "doc" }, proxy_request(recipe_buf, "textDocument/hover", pos(0, 7)))
     end)
 
     it("maps the hover range back to the recipe", function()
@@ -1071,7 +1059,7 @@ describe("embedded proxy client", function()
         })
         assert.are.same(
             { contents = "doc", range = { start = pos(0, 7), ["end"] = pos(0, 12) } },
-            hover(pos(0, 7))
+            proxy_request(recipe_buf, "textDocument/hover", pos(0, 7))
         )
     end)
 
@@ -1080,31 +1068,31 @@ describe("embedded proxy client", function()
             language = "python",
             hover = { contents = "doc", range = { start = pos(0, 0), ["end"] = pos(0, 3) } },
         })
-        assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
+        assert.are.same({ contents = "doc" }, proxy_request(recipe_buf, "textDocument/hover", pos(0, 7)))
     end)
 
     it("asks the bitbake server, not other clients on the recipe, for the language", function()
         -- Like GitHub Copilot: attached to every buffer, started first.
         vim.lsp.start({ name = "other", cmd = fake_cmd() }, { bufnr = recipe_buf })
         start_servers({ language = "python", hover = { contents = "doc" } })
-        assert.are.same({ contents = "doc" }, hover(pos(0, 7)))
+        assert.are.same({ contents = "doc" }, proxy_request(recipe_buf, "textDocument/hover", pos(0, 7)))
     end)
 
     it("does not forward when the bitbake server reports no language", function()
         local messages = start_servers({ language = nil, hover = { contents = "doc" } })
-        assert.is_nil(hover(pos(0, 7)))
+        assert.is_nil(proxy_request(recipe_buf, "textDocument/hover", pos(0, 7)))
         assert.are.equal(0, #requests_for(messages, "textDocument/hover"))
     end)
 
     it("does not forward positions outside the character indexes", function()
         local messages = start_servers({ language = "python", hover = { contents = "doc" } })
-        assert.is_nil(hover(pos(2, 1)))
+        assert.is_nil(proxy_request(recipe_buf, "textDocument/hover", pos(2, 1)))
         assert.are.equal(0, #requests_for(messages, "textDocument/hover"))
     end)
 
     it("returns nothing when no server is attached to the embedded doc", function()
         start_servers({ language = "python", python = false })
-        assert.is_nil(hover(pos(0, 7)))
+        assert.is_nil(proxy_request(recipe_buf, "textDocument/hover", pos(0, 7)))
     end)
 
     describe("definition", function()
@@ -1127,8 +1115,8 @@ describe("embedded proxy client", function()
                     },
                     results = { [method] = { { uri = "EMBEDDED", range = MAPPED } } },
                 })
-                assert.is_true(proxy_client():supports_method(method))
-                request(method, pos(0, 7))
+                assert.is_true(proxy_client(recipe_buf):supports_method(method))
+                proxy_request(recipe_buf, method, pos(0, 7))
                 local requests = requests_for(messages, method)
                 assert.are.equal(1, #requests)
                 assert.are.same(pos(0, 4), requests[1].params.position)
@@ -1141,7 +1129,7 @@ describe("embedded proxy client", function()
                 capabilities = { definitionProvider = true },
                 results = { ["textDocument/definition"] = result },
             })
-            return request("textDocument/definition", pos(1, 4))
+            return proxy_request(recipe_buf, "textDocument/definition", pos(1, 4))
         end
 
         it("maps a location in the embedded doc back to the recipe", function()
@@ -1224,7 +1212,7 @@ describe("embedded proxy client", function()
                     end,
                 },
             }, opts))
-            return request(opts.method or "textDocument/definition", pos(1, 4))
+            return proxy_request(recipe_buf, opts.method or "textDocument/definition", pos(1, 4))
         end
 
         it("finds a python function defined in an inherited class", function()
@@ -1395,7 +1383,7 @@ describe("embedded proxy client", function()
                 capabilities = { referencesProvider = true },
                 results = { ["textDocument/references"] = {} },
             })
-            local result = request("textDocument/references", pos(1, 4), { context = { includeDeclaration = true } })
+            local result = proxy_request(recipe_buf, "textDocument/references", pos(1, 4), { context = { includeDeclaration = true } })
             assert.are.same({}, result)
             assert.are.equal(0, #requests_for(bitbake_messages, "textDocument/definition"))
         end)
@@ -1409,7 +1397,7 @@ describe("embedded proxy client", function()
             capabilities = capability,
             results = { [method] = result },
         })
-        return request(method, pos(1, 4), extra), requests_for(messages, method)
+        return proxy_request(recipe_buf, method, pos(1, 4), extra), requests_for(messages, method)
     end
 
     describe("references", function()
@@ -1448,9 +1436,9 @@ describe("embedded proxy client", function()
 
         it("advertises completion with trigger characters", function()
             start_servers({ language = "python" })
-            assert.is_true(proxy_client():supports_method("textDocument/completion"))
+            assert.is_true(proxy_client(recipe_buf):supports_method("textDocument/completion"))
             assert.is_true(vim.list_contains(
-                proxy_client().server_capabilities.completionProvider.triggerCharacters,
+                proxy_client(recipe_buf).server_capabilities.completionProvider.triggerCharacters,
                 "."
             ))
         end)
@@ -1499,8 +1487,8 @@ describe("embedded proxy client", function()
     describe("rename", function()
         it("advertises rename with prepare support", function()
             start_servers({ language = "python" })
-            assert.is_true(proxy_client():supports_method("textDocument/rename"))
-            assert.is_true(proxy_client():supports_method("textDocument/prepareRename"))
+            assert.is_true(proxy_client(recipe_buf):supports_method("textDocument/rename"))
+            assert.is_true(proxy_client(recipe_buf):supports_method("textDocument/prepareRename"))
         end)
 
         it("maps workspace edit changes back to the recipe", function()
@@ -1610,14 +1598,14 @@ describe("embedded proxy client", function()
     it("attaches to bitbake buffers", function()
         vim.bo[recipe_buf].filetype = "bitbake"
         assert.is_true((vim.wait(500, function()
-            return proxy_client() ~= nil
+            return proxy_client(recipe_buf) ~= nil
         end)))
     end)
 
     it("does not attach to other buffers", function()
         vim.bo[recipe_buf].filetype = "sh"
         vim.wait(100)
-        assert.is_nil(proxy_client())
+        assert.is_nil(proxy_client(recipe_buf))
     end)
 end)
 
@@ -1654,22 +1642,11 @@ describe("with real language servers", function()
         "}",
     }
 
-    local function proxy_hover(position)
-        local proxy = vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded" })[1]
-        local response = proxy:request_sync(
-            "textDocument/hover",
-            { textDocument = { uri = recipe_uri }, position = position },
-            500,
-            recipe_buf
-        )
-        return response and response.result
-    end
-
     -- Language servers may answer nothing until they finished indexing.
     local function eventual_hover(position)
         local result
         vim.wait(500, function()
-            result = proxy_hover(position)
+            result = proxy_request(recipe_buf, "textDocument/hover", position)
             return result ~= nil
         end, 50)
         return result
@@ -2154,24 +2131,6 @@ describe("real python servers find bitbake modules of the project", function()
 
     local yocto, root, write, recipe_buf, recipe_uri
 
-    local function proxy_request(method, position)
-        local proxy = vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded" })[1]
-        if not proxy then
-            return nil
-        end
-        local response = proxy:request_sync(
-            method,
-            { textDocument = { uri = recipe_uri }, position = position },
-            500,
-            recipe_buf
-        )
-        return response and response.result
-    end
-
-    local function proxy_hover(position)
-        return proxy_request("textDocument/hover", position)
-    end
-
     before_each(function()
         yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
@@ -2211,7 +2170,7 @@ describe("real python servers find bitbake modules of the project", function()
 
             local contents
             vim.wait(500, function()
-                local result = proxy_hover(pos(2, 8))
+                local result = proxy_client(recipe_buf) and proxy_request(recipe_buf, "textDocument/hover", pos(2, 8))
                 contents = result and vim.inspect(result.contents)
                 return contents ~= nil and contents:find("yocto test doc", 1, true) ~= nil
             end, 50)
@@ -2225,7 +2184,7 @@ describe("real python servers find bitbake modules of the project", function()
 
             local target
             vim.wait(500, function()
-                local result = proxy_request("textDocument/definition", pos(2, 8))
+                local result = proxy_client(recipe_buf) and proxy_request(recipe_buf, "textDocument/definition", pos(2, 8))
                 local location = result and (result[1] or result)
                 target = location and (location.uri or location.targetUri)
                 return target ~= nil
@@ -2240,7 +2199,7 @@ describe("real python servers find bitbake modules of the project", function()
 
             local labels = {}
             vim.wait(500, function()
-                local result = proxy_request("textDocument/completion", pos(2, 7))
+                local result = proxy_client(recipe_buf) and proxy_request(recipe_buf, "textDocument/completion", pos(2, 7))
                 for _, item in ipairs(result and (result.items or result) or {}) do
                     labels[item.label] = true
                 end
@@ -2318,7 +2277,7 @@ describe("oelint output parsing", function()
     end)
 end)
 
-describe("oelint run", function()
+describe("oelint", function()
     local oelint, dir, bufnr, name, executable_mocks, system, executable
 
     before_each(function()
@@ -2353,70 +2312,8 @@ describe("oelint run", function()
         vim.fn.delete(dir, "rf")
     end)
 
-    it("refuses when oelint-adv is not executable", function()
-        vim.fn.executable = function()
-            return 0
-        end
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal("oelint-adv not found", err)
-    end)
-
-    it("refuses buffers that are not bitbake files", function()
-        set_filetype(bufnr, "python")
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal("not a bitbake buffer", err)
-    end)
-
-    it("refuses modified buffers", function()
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "changed" })
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal("buffer has unsaved changes", err)
-    end)
-
-    it("sets diagnostics from the output", function()
-        executable_mocks["oelint-adv"] = function()
-            return { code = 0, stdout = "", stderr = name .. ":1:error:a.b:broken" }
-        end
-        assert.is_true(oelint.run(bufnr))
-        wait_done(oelint)
-        local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
-        assert.are.equal(1, #d)
-        assert.are.equal("broken", d[1].message)
-    end)
-
-    it("clears old diagnostics when it starts", function()
-        executable_mocks["oelint-adv"] = function() end
-        vim.diagnostic.set(oelint.namespace, bufnr, { { lnum = 0, col = 0, message = "old" } })
-        oelint.run(bufnr)
-        assert.are.same({}, vim.diagnostic.get(bufnr, { namespace = oelint.namespace }))
-    end)
-
-    it("passes the cache options, extra arguments and file name", function()
-        local command
-        executable_mocks["oelint-adv"] = function(args)
-            command = args
-            return { code = 0, stdout = "", stderr = "" }
-        end
-        oelint.run(bufnr, { args = { "--quiet", "--fix" } })
-        wait_done(oelint)
-        assert.are.same(
-            { "oelint-adv", "--cached", "--cachedir", oelint.cachedir, "--quiet", "--fix", name },
-            command
-        )
-    end)
-
-    it("refuses to start while a run is in progress", function()
-        executable_mocks["oelint-adv"] = function() end
-        assert.is_true(oelint.run(bufnr))
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal("oelint-adv is still running", err)
-    end)
-
-    it("restarts a run in progress when forced", function()
+    -- The first run reports "first" after a delay, later runs "second" at once.
+    local function mock_slow_first_run()
         local runs = 0
         executable_mocks["oelint-adv"] = function()
             runs = runs + 1
@@ -2425,80 +2322,110 @@ describe("oelint run", function()
             end
             return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:second" }
         end
-        oelint.run(bufnr)
-        assert.is_true(oelint.run(bufnr, { force = true }))
-        wait_done(oelint)
-        vim.wait(100)
-        local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
-        assert.are.equal(1, #d)
-        assert.are.equal("second", d[1].message)
-    end)
-end)
+    end
 
-describe("oelint autocommands", function()
-    local oelint, dir, bufnr, name, executable_mocks, system, executable
-
-    before_each(function()
-        oelint = require("yocto.oelint")
-        system = vim.system
-        executable = vim.fn.executable
-        executable_mocks = {
-            ["oelint-adv"] = function() end,
-        }
-        vim.system = fake_system(executable_mocks)
-        vim.fn.executable = function(cmd)
-            return cmd == "oelint-adv" and 1 or 0
-        end
-        dir = vim.fn.tempname()
-        vim.fn.mkdir(dir, "p")
-        name = dir .. "/foo_1.0.bb"
-        vim.fn.writefile({ 'SUMMARY = "x"' }, name)
-        bufnr = vim.fn.bufadd(name)
-        vim.fn.bufload(bufnr)
-        set_filetype(bufnr, "bitbake")
-        -- Loading a .bb file detects its filetype, which already starts a run.
-        oelint.stop()
-    end)
-
-    after_each(function()
-        oelint.stop()
-        vim.system = system
-        vim.fn.executable = executable
-        vim.api.nvim_buf_delete(bufnr, { force = true })
-        vim.fn.delete(dir, "rf")
-    end)
-
-    it("lints bitbake buffers when they are written", function()
-        vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
-        assert.is_true(oelint.running())
-    end)
-
-    it("lints buffers when they become bitbake buffers", function()
-        vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr, modeline = false })
-        assert.is_true(oelint.running())
-    end)
-
-    it("restarts a run in progress when the buffer is written again", function()
-        local runs = 0
-        executable_mocks["oelint-adv"] = function()
-            runs = runs + 1
-            if runs == 1 then
-                return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:first", delay = 50 }
+    describe("run", function()
+        it("refuses when oelint-adv is not executable", function()
+            vim.fn.executable = function()
+                return 0
             end
-            return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:second" }
-        end
-        vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
-        vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
-        wait_done(oelint)
-        vim.wait(100)
-        local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
-        assert.are.equal(1, #d)
-        assert.are.equal("second", d[1].message)
+            local ok, err = oelint.run(bufnr)
+            assert.is_false(ok)
+            assert.are.equal("oelint-adv not found", err)
+        end)
+
+        it("refuses buffers that are not bitbake files", function()
+            set_filetype(bufnr, "python")
+            local ok, err = oelint.run(bufnr)
+            assert.is_false(ok)
+            assert.are.equal("not a bitbake buffer", err)
+        end)
+
+        it("refuses modified buffers", function()
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "changed" })
+            local ok, err = oelint.run(bufnr)
+            assert.is_false(ok)
+            assert.are.equal("buffer has unsaved changes", err)
+        end)
+
+        it("sets diagnostics from the output", function()
+            executable_mocks["oelint-adv"] = function()
+                return { code = 0, stdout = "", stderr = name .. ":1:error:a.b:broken" }
+            end
+            assert.is_true(oelint.run(bufnr))
+            wait_done(oelint)
+            local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
+            assert.are.equal(1, #d)
+            assert.are.equal("broken", d[1].message)
+        end)
+
+        it("clears old diagnostics when it starts", function()
+            executable_mocks["oelint-adv"] = function() end
+            vim.diagnostic.set(oelint.namespace, bufnr, { { lnum = 0, col = 0, message = "old" } })
+            oelint.run(bufnr)
+            assert.are.same({}, vim.diagnostic.get(bufnr, { namespace = oelint.namespace }))
+        end)
+
+        it("passes the cache options, extra arguments and file name", function()
+            local command
+            executable_mocks["oelint-adv"] = function(args)
+                command = args
+                return { code = 0, stdout = "", stderr = "" }
+            end
+            oelint.run(bufnr, { args = { "--quiet", "--fix" } })
+            wait_done(oelint)
+            assert.are.same(
+                { "oelint-adv", "--cached", "--cachedir", oelint.cachedir, "--quiet", "--fix", name },
+                command
+            )
+        end)
+
+        it("refuses to start while a run is in progress", function()
+            executable_mocks["oelint-adv"] = function() end
+            assert.is_true(oelint.run(bufnr))
+            local ok, err = oelint.run(bufnr)
+            assert.is_false(ok)
+            assert.are.equal("oelint-adv is still running", err)
+        end)
+
+        it("restarts a run in progress when forced", function()
+            mock_slow_first_run()
+            oelint.run(bufnr)
+            assert.is_true(oelint.run(bufnr, { force = true }))
+            wait_done(oelint)
+            vim.wait(100)
+            local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
+            assert.are.equal(1, #d)
+            assert.are.equal("second", d[1].message)
+        end)
     end)
 
-    it("does not lint other buffers when they are written", function()
-        set_filetype(bufnr, "python")
-        vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
-        assert.is_false(oelint.running())
+    describe("autocommands", function()
+        it("lints bitbake buffers when they are written", function()
+            vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
+            assert.is_true(oelint.running())
+        end)
+
+        it("lints buffers when they become bitbake buffers", function()
+            vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr, modeline = false })
+            assert.is_true(oelint.running())
+        end)
+
+        it("restarts a run in progress when the buffer is written again", function()
+            mock_slow_first_run()
+            vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
+            vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
+            wait_done(oelint)
+            vim.wait(100)
+            local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
+            assert.are.equal(1, #d)
+            assert.are.equal("second", d[1].message)
+        end)
+
+        it("does not lint other buffers when they are written", function()
+            set_filetype(bufnr, "python")
+            vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
+            assert.is_false(oelint.running())
+        end)
     end)
 end)
