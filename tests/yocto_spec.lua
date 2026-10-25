@@ -344,13 +344,10 @@ describe("embedded language docs handler", function()
 end)
 
 describe("default language server configs", function()
-    local yocto
-
     before_each(function()
         for _, name in ipairs(DEFAULT_NAMES) do
             vim.lsp.config[name] = {}
         end
-        yocto = require("yocto")
     end)
 
     it("registers yocto_bitbake for bitbake files", function()
@@ -398,7 +395,7 @@ describe("language server selection", function()
         for _, name in ipairs(DEFAULT_NAMES) do
             vim.lsp.config[name] = {}
         end
-        require("yocto").register_defaults()
+        yocto.register_defaults()
     end)
 
     after_each(function()
@@ -452,10 +449,7 @@ describe("language server selection", function()
 end)
 
 describe("notification handler registration", function()
-    local yocto
-
     before_each(function()
-        yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
     end)
 
@@ -470,7 +464,6 @@ describe("notification handler registration", function()
 end)
 
 describe("offset conversion", function()
-    local yocto = require("yocto")
     local lines = { "ab", "", "cé", "x😀y" }
 
     it("maps the first position to offset 0", function()
@@ -542,8 +535,6 @@ for o = 0, 28 do
 end
 
 describe("position mapping", function()
-    local yocto = require("yocto")
-
     describe("to_embedded_position", function()
         it("maps through an identity mapping unchanged", function()
             local lines = { "ab", "c" }
@@ -601,8 +592,6 @@ describe("position mapping", function()
 end)
 
 describe("range mapping", function()
-    local yocto = require("yocto")
-
     it("maps an original range to the embedded document", function()
         assert.are.same(
             range(0, 4, 0, 9),
@@ -627,8 +616,6 @@ describe("range mapping", function()
 end)
 
 describe("bitbake file scanning", function()
-    local yocto = require("yocto")
-
     describe("find_function python", function()
         it("finds the name of a python def", function()
             local lines = { "X = '1'", "def foo(d):", "    pass" }
@@ -808,14 +795,11 @@ describe("bitbake file scanning", function()
 end)
 
 describe("embedded buffers", function()
-    local yocto
-
     local function embedded_buf(language)
         return vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(ORIG, language)))
     end
 
     before_each(function()
-        yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
     end)
 
@@ -902,10 +886,9 @@ describe("embedded buffers", function()
 end)
 
 describe("embedded proxy client", function()
-    local yocto, recipe_buf
+    local recipe_buf
 
     before_each(function()
-        yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
         recipe_buf = make_buf(vim.uri_to_fname(ORIG), RECIPE)
     end)
@@ -1634,7 +1617,7 @@ describe("default storage_dir", function()
 end)
 
 describe("with real language servers", function()
-    local yocto, dir, recipe_buf, recipe_uri
+    local dir, recipe_buf, recipe_uri
 
     local REAL_RECIPE = {
         'SUMMARY = "foo"',
@@ -1658,7 +1641,6 @@ describe("with real language servers", function()
     end
 
     before_each(function()
-        yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
         local write
         dir, write = temp_tree()
@@ -1698,7 +1680,7 @@ describe("with real language servers", function()
 end)
 
 describe("bitbake project settings", function()
-    local yocto, root, write, recipe_buf, messages
+    local root, write, recipe_buf, messages
 
     local function open_recipe()
         local path = write("sources/meta-foo/recipes-foo/foo/foo_1.0.bb", { 'SUMMARY = "foo"' })
@@ -1720,7 +1702,6 @@ describe("bitbake project settings", function()
     end
 
     before_each(function()
-        yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
         root, write = temp_tree()
         messages = {}
@@ -1808,7 +1789,6 @@ describe("bitbake project settings", function()
 end)
 
 describe("project_root", function()
-    local yocto = require("yocto")
     local root, write
 
     before_each(function()
@@ -1840,7 +1820,6 @@ describe("project_root", function()
 end)
 
 describe("bitbake_python_paths", function()
-    local yocto = require("yocto")
     local root, write
 
     local function bitbake_at(dir)
@@ -1915,7 +1894,6 @@ describe("bitbake_python_paths", function()
 end)
 
 describe("project_dir", function()
-    local yocto = require("yocto")
     local root, write
 
     before_each(function()
@@ -1957,7 +1935,7 @@ describe("project_dir", function()
 end)
 
 describe("embedded python servers", function()
-    local yocto, root, write, messages
+    local root, write, messages
 
     local function setup_project(name)
         write(name .. "/sources/poky/bitbake/lib/bb/__init__.py")
@@ -1994,7 +1972,6 @@ describe("embedded python servers", function()
     end
 
     before_each(function()
-        yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
         root, write = temp_tree()
         messages = {}
@@ -2124,10 +2101,9 @@ describe("real python servers find bitbake modules of the project", function()
         { name = "zubanls", cmd = { "zuban", "server" } },
     }
 
-    local yocto, root, write, recipe_buf, recipe_uri
+    local root, write, recipe_buf, recipe_uri
 
     before_each(function()
-        yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
         root, write = temp_tree()
         write("sources/poky/bitbake/lib/bb/__init__.py", {
