@@ -71,6 +71,102 @@ local function wait_done(oelint)
     end, 10))
 end
 
+local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
+
+-- In-process fake language server. Records requests and notifications into
+-- `messages`. `opts.handlers[method](params)` answers requests,
+-- `opts.notifications[method](params, dispatchers)` reacts to notifications
+-- and `opts.capabilities` extends the advertised capabilities.
+local function fake_cmd(messages, opts)
+    opts = opts or {}
+    local capabilities = vim.tbl_extend(
+        "force",
+        { textDocumentSync = { openClose = true, change = 1 } },
+        opts.capabilities or {}
+    )
+    return function(dispatchers)
+        local closing = false
+        local next_id = 0
+        local function close()
+            if not closing then
+                closing = true
+                vim.schedule(function()
+                    dispatchers.on_exit(0, 0)
+                end)
+            end
+        end
+        return {
+            request = function(method, params, callback, notify_reply_callback)
+                next_id = next_id + 1
+                local id = next_id
+                if messages then
+                    table.insert(messages, { method = method, params = params })
+                end
+                vim.schedule(function()
+                    local result
+                    if method == "initialize" then
+                        result = { capabilities = capabilities }
+                    elseif opts.handlers and opts.handlers[method] then
+                        result = opts.handlers[method](params)
+                    end
+                    callback(nil, result)
+                    if notify_reply_callback then
+                        notify_reply_callback(id)
+                    end
+                end)
+                return true, id
+            end,
+            notify = function(method, params)
+                if messages then
+                    table.insert(messages, { method = method, params = params })
+                end
+                if opts.notifications and opts.notifications[method] then
+                    vim.schedule(function()
+                        opts.notifications[method](params, dispatchers)
+                    end)
+                end
+                if method == "exit" then
+                    close()
+                end
+                return true
+            end,
+            is_closing = function()
+                return closing
+            end,
+            terminate = close,
+        }
+    end
+end
+
+-- Disable all test configs and wait for their clients to exit. Clients
+-- still initializing are hidden from get_clients() and vim.lsp.enable(false)
+-- unless _uninitialized is passed; they would otherwise be reused later.
+local function stop_servers()
+    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", "user_bash", "user_zuban", unpack(DEFAULT_NAMES) }, false)
+    for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
+        client:stop(true)
+    end
+    vim.wait(500, function()
+        return #vim.lsp.get_clients({ _uninitialized = true }) == 0
+    end)
+end
+
+local function pos(line, character)
+    return { line = line, character = character }
+end
+
+-- Build a temporary directory tree; returns its root and a writer for it.
+local function temp_tree()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    return root, function(relpath, lines)
+        local path = vim.fs.joinpath(root, relpath)
+        vim.fn.mkdir(vim.fs.dirname(path), "p")
+        vim.fn.writefile(lines or {}, path)
+        return path
+    end
+end
+
 describe("embedded language docs handler", function()
     local dir
 
@@ -197,86 +293,6 @@ describe("embedded language docs handler", function()
 
 end)
 
-local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
-
--- In-process fake language server. Records requests and notifications into
--- `messages`. `opts.handlers[method](params)` answers requests,
--- `opts.notifications[method](params, dispatchers)` reacts to notifications
--- and `opts.capabilities` extends the advertised capabilities.
-local function fake_cmd(messages, opts)
-    opts = opts or {}
-    local capabilities = vim.tbl_extend(
-        "force",
-        { textDocumentSync = { openClose = true, change = 1 } },
-        opts.capabilities or {}
-    )
-    return function(dispatchers)
-        local closing = false
-        local next_id = 0
-        local function close()
-            if not closing then
-                closing = true
-                vim.schedule(function()
-                    dispatchers.on_exit(0, 0)
-                end)
-            end
-        end
-        return {
-            request = function(method, params, callback, notify_reply_callback)
-                next_id = next_id + 1
-                local id = next_id
-                if messages then
-                    table.insert(messages, { method = method, params = params })
-                end
-                vim.schedule(function()
-                    local result
-                    if method == "initialize" then
-                        result = { capabilities = capabilities }
-                    elseif opts.handlers and opts.handlers[method] then
-                        result = opts.handlers[method](params)
-                    end
-                    callback(nil, result)
-                    if notify_reply_callback then
-                        notify_reply_callback(id)
-                    end
-                end)
-                return true, id
-            end,
-            notify = function(method, params)
-                if messages then
-                    table.insert(messages, { method = method, params = params })
-                end
-                if opts.notifications and opts.notifications[method] then
-                    vim.schedule(function()
-                        opts.notifications[method](params, dispatchers)
-                    end)
-                end
-                if method == "exit" then
-                    close()
-                end
-                return true
-            end,
-            is_closing = function()
-                return closing
-            end,
-            terminate = close,
-        }
-    end
-end
-
--- Disable all test configs and wait for their clients to exit. Clients
--- still initializing are hidden from get_clients() and vim.lsp.enable(false)
--- unless _uninitialized is passed; they would otherwise be reused later.
-local function stop_servers()
-    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", "user_bash", "user_zuban", unpack(DEFAULT_NAMES) }, false)
-    for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
-        client:stop(true)
-    end
-    vim.wait(500, function()
-        return #vim.lsp.get_clients({ _uninitialized = true }) == 0
-    end)
-end
-
 describe("default language server configs", function()
     local yocto
 
@@ -402,10 +418,6 @@ describe("notification handler registration", function()
         assert.are.equal("echo hi", readfile_from_uri(yocto.get_embedded_uri(ORIG, "bash")))
     end)
 end)
-
-local function pos(line, character)
-    return { line = line, character = character }
-end
 
 describe("offset conversion", function()
     local yocto = require("yocto")
@@ -1800,18 +1812,6 @@ describe("bitbake project settings", function()
         )
     end)
 end)
-
--- Build a temporary directory tree; returns its root and a writer for it.
-local function temp_tree()
-    local root = vim.fn.tempname()
-    vim.fn.mkdir(root, "p")
-    return root, function(relpath, lines)
-        local path = vim.fs.joinpath(root, relpath)
-        vim.fn.mkdir(vim.fs.dirname(path), "p")
-        vim.fn.writefile(lines or {}, path)
-        return path
-    end
-end
 
 describe("project_root", function()
     local yocto = require("yocto")
