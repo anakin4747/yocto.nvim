@@ -94,6 +94,11 @@ local function flush_scheduled()
     end, 0))
 end
 
+-- Waits for cond to hold and fails the test when it times out.
+local function wait_until(cond, interval)
+    assert.is_true(vim.wait(500, cond, interval), "timed out waiting for condition")
+end
+
 local function wait_for_oelint()
     assert.is_true(vim.wait(10000, function()
         return not require("yocto.oelint").running()
@@ -870,7 +875,7 @@ describe("embedded buffers", function()
         enable_user_server("sh", messages)
         yocto.handler(nil, { doc("bash", "old") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "bash")
-        vim.wait(500, function()
+        wait_until(function()
             return server_text(messages, uri) == "old\n"
         end)
         yocto.handler(nil, { doc("bash", "new") }, {})
@@ -1004,7 +1009,7 @@ describe("embedded proxy client", function()
         vim.bo[recipe_buf].filetype = "bitbake"
         yocto.handler(nil, { doc(embedded, table.concat(fixture.lines, "\n"), fixture.indexes) }, {})
         local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(embedded_uri()))
-        vim.wait(500, function()
+        wait_until(function()
             return proxy_client(recipe_buf) ~= nil
                 and #vim.lsp.get_clients({ bufnr = recipe_buf, name = "user_bitbake" }) == 1
                 and (opts.python == false
@@ -1541,7 +1546,7 @@ describe("embedded proxy client", function()
         end
 
         local function recipe_diagnostics(count)
-            vim.wait(500, function()
+            wait_until(function()
                 return #vim.diagnostic.get(recipe_buf) == count
             end, 10)
             return vim.diagnostic.get(recipe_buf)
@@ -1689,7 +1694,7 @@ describe("bitbake project settings", function()
         local path = write("sources/meta-foo/recipes-foo/foo/foo_1.0.bb", { 'SUMMARY = "foo"' })
         recipe_buf = vim.fn.bufadd(path)
         vim.fn.bufload(recipe_buf)
-        vim.wait(500, function()
+        wait_until(function()
             return #vim.tbl_filter(function(m)
                 return m.method == "workspace/didChangeConfiguration"
             end, messages) > 0
@@ -1967,7 +1972,7 @@ describe("embedded python servers", function()
         yocto.handler(nil, { doc("python", "x = 1", {}, recipe_uri) }, {})
         local bufnr = vim.fn.bufnr(vim.uri_to_fname(yocto.get_embedded_uri(recipe_uri, "python")))
         local client
-        vim.wait(500, function()
+        wait_until(function()
             client = vim.lsp.get_clients({ bufnr = bufnr, name = "user_python" })[1]
             return client ~= nil
         end)
@@ -1998,7 +2003,7 @@ describe("embedded python servers", function()
         local recipe = setup_project("a")
         local client = open_python_doc(recipe)
         assert.are.equal(yocto.project_dir(recipe), client.root_dir)
-        vim.wait(500, function()
+        wait_until(function()
             return #messages > 0
         end)
         assert.are.equal(vim.uri_from_fname(yocto.project_dir(recipe)), messages[1].params.workspaceFolders[1].uri)
