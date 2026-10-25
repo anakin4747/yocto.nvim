@@ -26,7 +26,7 @@ local function remove_storage(dir)
     vim.fn.delete(dir, "rf")
 end
 
-local function read(uri)
+local function readfile_from_uri(uri)
     return table.concat(vim.fn.readfile(vim.uri_to_fname(uri)), "\n")
 end
 
@@ -46,20 +46,20 @@ describe("embedded language docs handler", function()
         yocto.handler(nil, { doc("bash", "echo hi") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "bash")
         assert.is_not_nil(uri:match("%.sh$"))
-        assert.are.equal("echo hi", read(uri))
+        assert.are.equal("echo hi", readfile_from_uri(uri))
     end)
 
     it("writes a .py file for a python doc", function()
         yocto.handler(nil, { doc("python", "x = 1") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "python")
         assert.is_not_nil(uri:match("%.py$"))
-        assert.are.equal("x = 1", read(uri))
+        assert.are.equal("x = 1", readfile_from_uri(uri))
     end)
 
     it("writes both files from a single notification", function()
         yocto.handler(nil, { doc("bash", "echo hi"), doc("python", "x = 1") }, {})
-        assert.are.equal("echo hi", read(yocto.get_embedded_uri(ORIG, "bash")))
-        assert.are.equal("x = 1", read(yocto.get_embedded_uri(ORIG, "python")))
+        assert.are.equal("echo hi", readfile_from_uri(yocto.get_embedded_uri(ORIG, "bash")))
+        assert.are.equal("x = 1", readfile_from_uri(yocto.get_embedded_uri(ORIG, "python")))
     end)
 
     it("places files in the project directory of the recipe", function()
@@ -92,7 +92,7 @@ describe("embedded language docs handler", function()
     it("overwrites content on a subsequent notification", function()
         yocto.handler(nil, { doc("bash", "old") }, {})
         yocto.handler(nil, { doc("bash", "new") }, {})
-        assert.are.equal("new", read(yocto.get_embedded_uri(ORIG, "bash")))
+        assert.are.equal("new", readfile_from_uri(yocto.get_embedded_uri(ORIG, "bash")))
     end)
 
     it("reloads an already loaded buffer of the embedded file", function()
@@ -139,8 +139,8 @@ describe("embedded language docs handler", function()
 
     it("accepts docs wrapped in positional params as sent by the server", function()
         yocto.handler(nil, { { doc("bash", "echo hi"), doc("python", "x = 1") } }, {})
-        assert.are.equal("echo hi", read(yocto.get_embedded_uri(ORIG, "bash")))
-        assert.are.equal("x = 1", read(yocto.get_embedded_uri(ORIG, "python")))
+        assert.are.equal("echo hi", readfile_from_uri(yocto.get_embedded_uri(ORIG, "bash")))
+        assert.are.equal("x = 1", readfile_from_uri(yocto.get_embedded_uri(ORIG, "python")))
     end)
 
     it("ignores unknown languages", function()
@@ -358,7 +358,7 @@ describe("notification handler registration", function()
 
     it("handles bitbake/EmbeddedLanguageDocs through vim.lsp.handlers", function()
         vim.lsp.handlers["bitbake/EmbeddedLanguageDocs"](nil, { doc("bash", "echo hi") }, {})
-        assert.are.equal("echo hi", read(yocto.get_embedded_uri(ORIG, "bash")))
+        assert.are.equal("echo hi", readfile_from_uri(yocto.get_embedded_uri(ORIG, "bash")))
     end)
 end)
 
