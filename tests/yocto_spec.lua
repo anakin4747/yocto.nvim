@@ -1592,8 +1592,11 @@ describe("embedded proxy client", function()
 
     it("does not attach to other buffers", function()
         vim.bo[recipe_buf].filetype = "sh"
-        vim.wait(100)
-        assert.is_nil(proxy_client(recipe_buf))
+        -- Also count a proxy that is still initializing, so no wait is needed.
+        assert.are.same(
+            {},
+            vim.lsp.get_clients({ bufnr = recipe_buf, name = "yocto_embedded", _uninitialized = true })
+        )
     end)
 end)
 
