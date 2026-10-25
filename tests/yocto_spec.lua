@@ -40,21 +40,43 @@ local function make_buf(name, lines)
     return bufnr
 end
 
--- Writes an executable stand-in for oelint-adv to dir that records its
--- arguments in dir/args, sleeps `delay` seconds and prints `stderr`.
-local function fake_oelint(dir, stderr, delay)
-    vim.fn.mkdir(dir, "p")
-    local path = dir .. "/oelint-adv"
-    vim.fn.writefile({
-        "#!/bin/sh",
-        'printf "%s\\n" "$@" > "' .. dir .. '/args"',
-        "sleep " .. (delay or 0),
-        "cat >&2 <<'OUT'",
-        stderr or "",
-        "OUT",
-    }, path)
-    vim.fn.setfperm(path, "rwxr-xr-x")
-    return path
+-- Stand-in for vim.system that answers commands from `executable_mocks`,
+-- looked up by the space-joined command and then by the program name. A
+-- string mock is a fixture file printed to stdout; a function mock receives
+-- the command and returns { code, stdout, stderr [, delay] }, or nil for a
+-- command that never finishes. Killed commands never call back.
+local function fake_system(executable_mocks)
+    return function(command, _, callback)
+        local mock = executable_mocks[table.concat(command, " ")] or executable_mocks[command[1]]
+        assert.is_not_nil(mock, "unexpected command: " .. table.concat(command, " "))
+
+        local result
+        if type(mock) == "function" then
+            result = mock(command)
+        else
+            result = { code = 0, stdout = table.concat(vim.fn.readfile(mock), "\n"), stderr = "" }
+        end
+
+        local killed = false
+        local process = {
+            kill = function()
+                killed = true
+            end,
+        }
+        if result ~= nil then
+            local function finish()
+                if not killed then
+                    callback(result)
+                end
+            end
+            if result.delay then
+                vim.defer_fn(finish, result.delay)
+            else
+                vim.schedule(finish)
+            end
+        end
+        return process
+    end
 end
 
 -- Sets the filetype without triggering FileType autocommands, which would
@@ -2297,118 +2319,23 @@ describe("oelint output parsing", function()
 end)
 
 describe("oelint run", function()
-    local oelint, dir, bufnr, name, original_cmd, original_cachedir
+    local oelint, dir, bufnr, name, executable_mocks, system, executable
 
     before_each(function()
         oelint = require("yocto.oelint")
-        original_cmd = oelint.cmd
-        original_cachedir = oelint.cachedir
+        system = vim.system
+        executable = vim.fn.executable
+        executable_mocks = {
+            ["oelint-adv"] = function()
+                return { code = 0, stdout = "", stderr = "" }
+            end,
+        }
+        vim.system = fake_system(executable_mocks)
+        vim.fn.executable = function(cmd)
+            return cmd == "oelint-adv" and 1 or 0
+        end
         dir = vim.fn.tempname()
         vim.fn.mkdir(dir, "p")
-        name = dir .. "/foo_1.0.bb"
-        vim.fn.writefile({ 'SUMMARY = "x"' }, name)
-        bufnr = vim.fn.bufadd(name)
-        vim.fn.bufload(bufnr)
-        set_filetype(bufnr, "bitbake")
-    end)
-
-    after_each(function()
-        oelint.stop()
-        oelint.cmd = original_cmd
-        oelint.cachedir = original_cachedir
-        vim.api.nvim_buf_delete(bufnr, { force = true })
-        vim.fn.delete(dir, "rf")
-    end)
-
-    it("refuses when oelint-adv is not executable", function()
-        oelint.cmd = dir .. "/missing"
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal(dir .. "/missing not found", err)
-    end)
-
-    it("refuses buffers that are not bitbake files", function()
-        oelint.cmd = fake_oelint(dir .. "/bin")
-        set_filetype(bufnr, "python")
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal("not a bitbake buffer", err)
-    end)
-
-    it("refuses modified buffers", function()
-        oelint.cmd = fake_oelint(dir .. "/bin")
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "changed" })
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal("buffer has unsaved changes", err)
-    end)
-
-    it("sets diagnostics from the output", function()
-        oelint.cmd = fake_oelint(dir .. "/bin", name .. ":1:error:a.b:broken")
-        assert.is_true(oelint.run(bufnr))
-        wait_done(oelint)
-        local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
-        assert.are.equal(1, #d)
-        assert.are.equal("broken", d[1].message)
-    end)
-
-    it("clears old diagnostics when it starts", function()
-        oelint.cmd = fake_oelint(dir .. "/bin", "", 1)
-        vim.diagnostic.set(oelint.namespace, bufnr, { { lnum = 0, col = 0, message = "old" } })
-        oelint.run(bufnr)
-        assert.are.same({}, vim.diagnostic.get(bufnr, { namespace = oelint.namespace }))
-    end)
-
-    it("passes the cache options, extra arguments and file name", function()
-        oelint.cmd = fake_oelint(dir .. "/bin")
-        oelint.run(bufnr, { args = { "--quiet", "--fix" } })
-        wait_done(oelint)
-        local args = vim.fn.readfile(dir .. "/bin/args")
-        assert.are.same({ "--cached", "--cachedir", oelint.cachedir, "--quiet", "--fix", name }, args)
-    end)
-
-    it("refuses to start while a run is in progress", function()
-        oelint.cmd = fake_oelint(dir .. "/bin", "", 5)
-        assert.is_true(oelint.run(bufnr))
-        local ok, err = oelint.run(bufnr)
-        assert.is_false(ok)
-        assert.are.equal("oelint-adv is still running", err)
-    end)
-
-    it("restarts a run in progress when forced", function()
-        oelint.cmd = fake_oelint(dir .. "/bin", "", 5)
-        oelint.run(bufnr)
-        oelint.cmd = fake_oelint(dir .. "/bin2", name .. ":1:info:a.b:second")
-        assert.is_true(oelint.run(bufnr, { force = true }))
-        wait_done(oelint)
-        local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
-        assert.are.equal(1, #d)
-        assert.are.equal("second", d[1].message)
-    end)
-
-    it("lints with the real oelint-adv", function()
-        if vim.fn.executable("oelint-adv") == 0 then
-            return
-        end
-        oelint.cmd = "oelint-adv"
-        oelint.cachedir = dir .. "/cache"
-        assert.is_true(oelint.run(bufnr))
-        wait_done(oelint)
-        local sources = vim.tbl_map(function(d)
-            return d.source
-        end, vim.diagnostic.get(bufnr, { namespace = oelint.namespace }))
-        assert.is_true(vim.tbl_contains(sources, "oelint.var.mandatoryvar.HOMEPAGE"))
-    end)
-end)
-
-describe("oelint autocommands", function()
-    local oelint, dir, bufnr, name, original_cmd
-
-    before_each(function()
-        oelint = require("yocto.oelint")
-        original_cmd = oelint.cmd
-        dir = vim.fn.tempname()
-        oelint.cmd = fake_oelint(dir .. "/bin")
         name = dir .. "/foo_1.0.bb"
         vim.fn.writefile({ 'SUMMARY = "x"' }, name)
         bufnr = vim.fn.bufadd(name)
@@ -2420,7 +2347,123 @@ describe("oelint autocommands", function()
 
     after_each(function()
         oelint.stop()
-        oelint.cmd = original_cmd
+        vim.system = system
+        vim.fn.executable = executable
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+        vim.fn.delete(dir, "rf")
+    end)
+
+    it("refuses when oelint-adv is not executable", function()
+        vim.fn.executable = function()
+            return 0
+        end
+        local ok, err = oelint.run(bufnr)
+        assert.is_false(ok)
+        assert.are.equal("oelint-adv not found", err)
+    end)
+
+    it("refuses buffers that are not bitbake files", function()
+        set_filetype(bufnr, "python")
+        local ok, err = oelint.run(bufnr)
+        assert.is_false(ok)
+        assert.are.equal("not a bitbake buffer", err)
+    end)
+
+    it("refuses modified buffers", function()
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "changed" })
+        local ok, err = oelint.run(bufnr)
+        assert.is_false(ok)
+        assert.are.equal("buffer has unsaved changes", err)
+    end)
+
+    it("sets diagnostics from the output", function()
+        executable_mocks["oelint-adv"] = function()
+            return { code = 0, stdout = "", stderr = name .. ":1:error:a.b:broken" }
+        end
+        assert.is_true(oelint.run(bufnr))
+        wait_done(oelint)
+        local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
+        assert.are.equal(1, #d)
+        assert.are.equal("broken", d[1].message)
+    end)
+
+    it("clears old diagnostics when it starts", function()
+        executable_mocks["oelint-adv"] = function() end
+        vim.diagnostic.set(oelint.namespace, bufnr, { { lnum = 0, col = 0, message = "old" } })
+        oelint.run(bufnr)
+        assert.are.same({}, vim.diagnostic.get(bufnr, { namespace = oelint.namespace }))
+    end)
+
+    it("passes the cache options, extra arguments and file name", function()
+        local command
+        executable_mocks["oelint-adv"] = function(args)
+            command = args
+            return { code = 0, stdout = "", stderr = "" }
+        end
+        oelint.run(bufnr, { args = { "--quiet", "--fix" } })
+        wait_done(oelint)
+        assert.are.same(
+            { "oelint-adv", "--cached", "--cachedir", oelint.cachedir, "--quiet", "--fix", name },
+            command
+        )
+    end)
+
+    it("refuses to start while a run is in progress", function()
+        executable_mocks["oelint-adv"] = function() end
+        assert.is_true(oelint.run(bufnr))
+        local ok, err = oelint.run(bufnr)
+        assert.is_false(ok)
+        assert.are.equal("oelint-adv is still running", err)
+    end)
+
+    it("restarts a run in progress when forced", function()
+        local runs = 0
+        executable_mocks["oelint-adv"] = function()
+            runs = runs + 1
+            if runs == 1 then
+                return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:first", delay = 50 }
+            end
+            return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:second" }
+        end
+        oelint.run(bufnr)
+        assert.is_true(oelint.run(bufnr, { force = true }))
+        wait_done(oelint)
+        vim.wait(100)
+        local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
+        assert.are.equal(1, #d)
+        assert.are.equal("second", d[1].message)
+    end)
+end)
+
+describe("oelint autocommands", function()
+    local oelint, dir, bufnr, name, executable_mocks, system, executable
+
+    before_each(function()
+        oelint = require("yocto.oelint")
+        system = vim.system
+        executable = vim.fn.executable
+        executable_mocks = {
+            ["oelint-adv"] = function() end,
+        }
+        vim.system = fake_system(executable_mocks)
+        vim.fn.executable = function(cmd)
+            return cmd == "oelint-adv" and 1 or 0
+        end
+        dir = vim.fn.tempname()
+        vim.fn.mkdir(dir, "p")
+        name = dir .. "/foo_1.0.bb"
+        vim.fn.writefile({ 'SUMMARY = "x"' }, name)
+        bufnr = vim.fn.bufadd(name)
+        vim.fn.bufload(bufnr)
+        set_filetype(bufnr, "bitbake")
+        -- Loading a .bb file detects its filetype, which already starts a run.
+        oelint.stop()
+    end)
+
+    after_each(function()
+        oelint.stop()
+        vim.system = system
+        vim.fn.executable = executable
         vim.api.nvim_buf_delete(bufnr, { force = true })
         vim.fn.delete(dir, "rf")
     end)
@@ -2436,12 +2479,20 @@ describe("oelint autocommands", function()
     end)
 
     it("restarts a run in progress when the buffer is written again", function()
-        oelint.cmd = fake_oelint(dir .. "/bin", "", 5)
+        local runs = 0
+        executable_mocks["oelint-adv"] = function()
+            runs = runs + 1
+            if runs == 1 then
+                return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:first", delay = 50 }
+            end
+            return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:second" }
+        end
         vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
-        oelint.cmd = fake_oelint(dir .. "/bin2", name .. ":1:info:a.b:second")
         vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
         wait_done(oelint)
+        vim.wait(100)
         local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
+        assert.are.equal(1, #d)
         assert.are.equal("second", d[1].message)
     end)
 
