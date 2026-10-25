@@ -9,10 +9,10 @@ local OTHER = "file:///tmp/meta/recipes/bar/bar_1.0.bb"
 
 local function doc(lang, content, idx, orig)
     return {
-        originalUri = orig or ORIG,
         language = lang,
         content = content,
         characterIndexes = idx or {},
+        originalUri = orig or ORIG,
     }
 end
 
