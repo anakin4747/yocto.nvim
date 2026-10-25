@@ -42,40 +42,34 @@ end
 
 -- Stand-in for vim.system that answers commands from `executable_mocks`,
 -- looked up by the space-joined command and then by the program name. A
--- string mock is a fixture file printed to stdout; a function mock receives
--- the command and returns { code, stdout, stderr [, delay] }, or nil for a
--- command that never finishes. Killed commands never call back.
+-- string mock is a fixture file printed to stdout. A function mock receives
+-- the command and a `finish(result)` function; it returns
+-- { code, stdout, stderr }, or nil to keep the command running until the test
+-- calls `finish`. Killing a command does not finish it.
 local function fake_system(executable_mocks)
     return function(command, _, callback)
         local mock = executable_mocks[table.concat(command, " ")] or executable_mocks[command[1]]
         assert.is_not_nil(mock, "unexpected command: " .. table.concat(command, " "))
 
+        local finished = false
+        local function finish(result)
+            assert.is_false(finished, "command finished twice: " .. table.concat(command, " "))
+            finished = true
+            vim.schedule(function()
+                callback(result)
+            end)
+        end
+
         local result
         if type(mock) == "function" then
-            result = mock(command)
+            result = mock(command, finish)
         else
             result = { code = 0, stdout = table.concat(vim.fn.readfile(mock), "\n"), stderr = "" }
         end
-
-        local killed = false
-        local process = {
-            kill = function()
-                killed = true
-            end,
-        }
         if result ~= nil then
-            local function finish()
-                if not killed then
-                    callback(result)
-                end
-            end
-            if result.delay then
-                vim.defer_fn(finish, result.delay)
-            else
-                vim.schedule(finish)
-            end
+            finish(result)
         end
-        return process
+        return { kill = function() end }
     end
 end
 
@@ -87,9 +81,22 @@ local function set_filetype(bufnr, filetype)
     end)
 end
 
-local function wait_done(oelint)
+-- Runs everything scheduled so far, including what that schedules in turn.
+local function flush_scheduled()
+    local done = false
+    vim.schedule(function()
+        vim.schedule(function()
+            done = true
+        end)
+    end)
+    assert.is_true(vim.wait(1000, function()
+        return done
+    end, 0))
+end
+
+local function wait_for_oelint()
     assert.is_true(vim.wait(10000, function()
-        return not oelint.running()
+        return not require("yocto.oelint").running()
     end, 10))
 end
 
@@ -2299,15 +2306,22 @@ describe("oelint", function()
         vim.fn.delete(dir, "rf")
     end)
 
-    -- The first run reports "first" after a delay, later runs "second" at once.
-    local function mock_slow_first_run()
-        local runs = 0
-        executable_mocks["oelint-adv"] = function()
+    -- The first run keeps running, later runs report "second". Returns a
+    -- function that ends the first run, reporting "first" as if it had been
+    -- killed after the later run finished.
+    local function mock_running_first_run()
+        local runs, finish_first = 0, nil
+        executable_mocks["oelint-adv"] = function(_, finish)
             runs = runs + 1
             if runs == 1 then
-                return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:first", delay = 50 }
+                finish_first = finish
+                return nil
             end
             return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:second" }
+        end
+        return function()
+            finish_first({ code = 0, signal = 15, stdout = "", stderr = name .. ":1:info:a.b:first" })
+            flush_scheduled()
         end
     end
 
@@ -2340,7 +2354,7 @@ describe("oelint", function()
                 return { code = 0, stdout = "", stderr = name .. ":1:error:a.b:broken" }
             end
             assert.is_true(oelint.run(bufnr))
-            wait_done(oelint)
+            wait_for_oelint()
             local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
             assert.are.equal(1, #d)
             assert.are.equal("broken", d[1].message)
@@ -2360,7 +2374,7 @@ describe("oelint", function()
                 return { code = 0, stdout = "", stderr = "" }
             end
             oelint.run(bufnr, { args = { "--quiet", "--fix" } })
-            wait_done(oelint)
+            wait_for_oelint()
             assert.are.same(
                 { "oelint-adv", "--cached", "--cachedir", oelint.cachedir, "--quiet", "--fix", name },
                 command
@@ -2376,11 +2390,11 @@ describe("oelint", function()
         end)
 
         it("restarts a run in progress when forced", function()
-            mock_slow_first_run()
+            local finish_first = mock_running_first_run()
             oelint.run(bufnr)
             assert.is_true(oelint.run(bufnr, { force = true }))
-            wait_done(oelint)
-            vim.wait(100)
+            wait_for_oelint()
+            finish_first()
             local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
             assert.are.equal(1, #d)
             assert.are.equal("second", d[1].message)
@@ -2399,11 +2413,11 @@ describe("oelint", function()
         end)
 
         it("restarts a run in progress when the buffer is written again", function()
-            mock_slow_first_run()
+            local finish_first = mock_running_first_run()
             vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
             vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr, modeline = false })
-            wait_done(oelint)
-            vim.wait(100)
+            wait_for_oelint()
+            finish_first()
             local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
             assert.are.equal(1, #d)
             assert.are.equal("second", d[1].message)
