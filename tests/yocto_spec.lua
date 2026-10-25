@@ -1653,10 +1653,9 @@ describe("with real language servers", function()
     before_each(function()
         yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
-        dir = vim.fn.tempname()
-        vim.fn.mkdir(dir, "p")
-        local path = vim.fs.joinpath(dir, "foo_1.0.bb")
-        vim.fn.writefile(REAL_RECIPE, path)
+        local write
+        dir, write = temp_tree()
+        local path = write("foo_1.0.bb", REAL_RECIPE)
         recipe_uri = vim.uri_from_fname(path)
         recipe_buf = vim.fn.bufadd(path)
         -- zubanls starts much faster than pyright.
@@ -1692,15 +1691,7 @@ describe("with real language servers", function()
 end)
 
 describe("bitbake project settings", function()
-    local yocto, root, recipe_buf, messages
-
-    -- Create files relative to the project root.
-    local function write(relpath, lines)
-        local path = vim.fs.joinpath(root, relpath)
-        vim.fn.mkdir(vim.fs.dirname(path), "p")
-        vim.fn.writefile(lines, path)
-        return path
-    end
+    local yocto, root, write, recipe_buf, messages
 
     local function open_recipe()
         local path = write("sources/meta-foo/recipes-foo/foo/foo_1.0.bb", { 'SUMMARY = "foo"' })
@@ -1724,8 +1715,7 @@ describe("bitbake project settings", function()
     before_each(function()
         yocto = require("yocto")
         yocto.storage_dir = vim.fn.tempname()
-        root = vim.fn.tempname()
-        vim.fn.mkdir(root, "p")
+        root, write = temp_tree()
         messages = {}
         vim.lsp.config("yocto_bitbake", { cmd = fake_cmd(messages) })
     end)
@@ -2291,10 +2281,9 @@ describe("oelint", function()
         vim.fn.executable = function(cmd)
             return cmd == "oelint-adv" and 1 or 0
         end
-        dir = vim.fn.tempname()
-        vim.fn.mkdir(dir, "p")
-        name = dir .. "/foo_1.0.bb"
-        vim.fn.writefile({ 'SUMMARY = "x"' }, name)
+        local write
+        dir, write = temp_tree()
+        name = write("foo_1.0.bb", { 'SUMMARY = "x"' })
         bufnr = vim.fn.bufadd(name)
         vim.fn.bufload(bufnr)
         set_filetype(bufnr, "bitbake")
