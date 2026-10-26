@@ -1,4 +1,6 @@
 vim.opt.swapfile = false
+-- Test files are temporary; do not wait for them to reach the disk.
+vim.opt.fsync = false
 vim.opt.runtimepath:append('.')
 
 local plenary_dirs = {
