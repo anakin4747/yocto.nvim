@@ -64,10 +64,23 @@ for specifying the environment to run `bitbake` in.
 
 ## Tests
 
-Run `make` to run the tests in a docker container:
+Only run tests through `make` so that they are ran through docker with plenary
+patched in the rootfs:
 
 ```sh
 make
+```
+
+Tests must remain fast so that the iteration cycle is as short as possible.
+
+New tests shall not increase the time to run tests by more than 0.2 seconds.
+This is the current time accepted time on my laptop:
+```
+time make
+
+real    0m0.958s
+user    0m0.732s
+sys     0m0.126s
 ```
 
 ## Demo
@@ -91,7 +104,7 @@ and setting your `'path'` to support recursively searching for files with `gf`
 or `gF`:
 
 ```vim
-set path+=**
+:set path+=**
 ```
 
 ### Completion
