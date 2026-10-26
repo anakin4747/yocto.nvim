@@ -387,7 +387,7 @@ local function record_cmd(session, name, real_cmd)
                 return dispatchers.notification(method, params)
             end,
         }, { __index = dispatchers })
-        local rpc = vim.lsp.rpc.start(real_cmd, recording_dispatchers, { cwd = config.cmd_cwd, env = config.cmd_env })
+        local rpc = _G.real_rpc_start(real_cmd, recording_dispatchers, { cwd = config.cmd_cwd, env = config.cmd_env })
         return recording_rpc(session, server, state, rpc)
     end
 end

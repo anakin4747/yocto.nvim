@@ -20,4 +20,13 @@ end
 vim.cmd('runtime plugin/plenary.vim')
 vim.cmd('runtime plugin/yocto.lua')
 
+-- Tests use fake servers; real ones are slow to start. Recording fixtures
+-- still needs them, through real_rpc_start. Abort the run: errors raised
+-- here are swallowed by vim.lsp.start callers.
+_G.real_rpc_start = vim.lsp.rpc.start
+vim.lsp.rpc.start = function(cmd)
+    io.stderr:write('tests must not start real language servers: ' .. table.concat(cmd, ' ') .. '\n')
+    vim.cmd('cquit 1')
+end
+
 vim.g.i_am_in_a_test = true
