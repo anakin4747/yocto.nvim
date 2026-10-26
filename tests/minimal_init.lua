@@ -50,5 +50,3 @@ vim.system = function(cmd, ...)
     end
     return system(cmd, ...)
 end
-
-vim.g.i_am_in_a_test = true

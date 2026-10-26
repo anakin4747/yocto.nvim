@@ -41,14 +41,13 @@ local function make_buf(name, lines)
 end
 
 -- Stand-in for vim.system that answers commands from `executable_mocks`,
--- looked up by the space-joined command and then by the program name. A
--- string mock is a fixture file printed to stdout. A function mock receives
--- the command and a `finish(result)` function; it returns
--- { code, stdout, stderr }, or nil to keep the command running until the test
--- calls `finish`. Killing a command does not finish it.
+-- looked up by program name. A mock receives the command and a
+-- `finish(result)` function; it returns { code, stdout, stderr }, or nil to
+-- keep the command running until the test calls `finish`. Killing a command
+-- does not finish it.
 local function fake_system(executable_mocks)
     return function(command, _, callback)
-        local mock = executable_mocks[table.concat(command, " ")] or executable_mocks[command[1]]
+        local mock = executable_mocks[command[1]]
         assert.is_not_nil(mock, "unexpected command: " .. table.concat(command, " "))
 
         local finished = false
@@ -60,12 +59,7 @@ local function fake_system(executable_mocks)
             end)
         end
 
-        local result
-        if type(mock) == "function" then
-            result = mock(command, finish)
-        else
-            result = { code = 0, stdout = table.concat(vim.fn.readfile(mock), "\n"), stderr = "" }
-        end
+        local result = mock(command, finish)
         if result ~= nil then
             finish(result)
         end
@@ -95,8 +89,8 @@ local function flush_scheduled()
 end
 
 -- Waits for cond to hold and fails the test when it times out.
-local function wait_until(cond, interval)
-    assert.is_true(vim.wait(500, cond, interval or 1), "timed out waiting for condition")
+local function wait_until(cond)
+    assert.is_true(vim.wait(500, cond, 1), "timed out waiting for condition")
 end
 
 local function wait_for_oelint()
@@ -226,7 +220,7 @@ end
 -- still initializing are hidden from get_clients() and vim.lsp.enable(false)
 -- unless _uninitialized is passed; they would otherwise be reused later.
 local function stop_servers()
-    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", "user_bash", "user_zuban", unpack(DEFAULT_NAMES) }, false)
+    vim.lsp.enable({ "user_server", "user_bitbake", "user_python", "user_bash", unpack(DEFAULT_NAMES) }, false)
     for _, client in ipairs(vim.lsp.get_clients({ _uninitialized = true })) do
         client:stop(true)
     end
@@ -1121,8 +1115,6 @@ describe("embedded buffers", function()
                     text = td.text
                 elseif m.method == "textDocument/didChange" then
                     text = m.params.contentChanges[#m.params.contentChanges].text
-                elseif m.method == "textDocument/didClose" then
-                    text = nil
                 end
             end
         end
