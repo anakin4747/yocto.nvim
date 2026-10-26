@@ -96,13 +96,13 @@ end
 
 -- Waits for cond to hold and fails the test when it times out.
 local function wait_until(cond, interval)
-    assert.is_true(vim.wait(500, cond, interval), "timed out waiting for condition")
+    assert.is_true(vim.wait(500, cond, interval or 1), "timed out waiting for condition")
 end
 
 local function wait_for_oelint()
     assert.is_true(vim.wait(10000, function()
         return not require("yocto.oelint").running()
-    end, 10))
+    end, 1))
 end
 
 local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
@@ -232,7 +232,7 @@ local function stop_servers()
     end
     vim.wait(500, function()
         return #vim.lsp.get_clients({ _uninitialized = true }) == 0
-    end)
+    end, 1)
 end
 
 -- Register the default configs with fake servers, so tests never start the
@@ -1139,9 +1139,9 @@ describe("embedded buffers", function()
         enable_user_server("sh", messages)
         yocto.handler(nil, { doc("bash", "echo hi") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "bash")
-        assert.is_true((vim.wait(500, function()
+        wait_until(function()
             return server_text(messages, uri) == "echo hi\n"
-        end)))
+        end)
     end)
 
     it("opens the python doc in the language server enabled for python", function()
@@ -1149,9 +1149,9 @@ describe("embedded buffers", function()
         enable_user_server("python", messages)
         yocto.handler(nil, { doc("python", "x = 1") }, {})
         local uri = yocto.get_embedded_uri(ORIG, "python")
-        assert.is_true((vim.wait(500, function()
+        wait_until(function()
             return server_text(messages, uri) == "x = 1\n"
-        end)))
+        end)
     end)
 
     it("sends updated content to the language server", function()
@@ -1163,9 +1163,9 @@ describe("embedded buffers", function()
             return server_text(messages, uri) == "old\n"
         end)
         yocto.handler(nil, { doc("bash", "new") }, {})
-        assert.is_true((vim.wait(500, function()
+        wait_until(function()
             return server_text(messages, uri) == "new\n"
-        end)))
+        end)
     end)
 
     it("does not list the embedded buffer", function()
@@ -1867,7 +1867,7 @@ describe("embedded proxy client", function()
         local function recipe_diagnostics(count)
             wait_until(function()
                 return #vim.diagnostic.get(recipe_buf) == count
-            end, 10)
+            end)
             return vim.diagnostic.get(recipe_buf)
         end
 
@@ -1930,7 +1930,7 @@ describe("embedded proxy client", function()
                 wait_until(function()
                     local diagnostics = vim.diagnostic.get(recipe_buf)
                     return #diagnostics == 1 and diagnostics[1].message == "new"
-                end, 10)
+                end)
             end)
 
             it("shows embedded bash diagnostics on the recipe", function()
@@ -1947,9 +1947,9 @@ describe("embedded proxy client", function()
 
     it("attaches to bitbake buffers", function()
         vim.bo[recipe_buf].filetype = "bitbake"
-        assert.is_true((vim.wait(500, function()
+        wait_until(function()
             return proxy_client(recipe_buf) ~= nil
-        end)))
+        end)
     end)
 
     it("does not attach to other buffers", function()
@@ -2014,7 +2014,7 @@ describe("with recorded language servers", function()
         wait_until(function()
             return yocto.get_embedded_uri(recipe_uri, "bash") ~= nil
                 and yocto.get_embedded_uri(recipe_uri, "python") ~= nil
-        end, 10)
+        end)
     end
 
     before_each(function()
@@ -2432,7 +2432,7 @@ describe("embedded python servers", function()
         open_python_doc(recipe)
         yocto.handler(nil, { doc("python", "x = 2", {}, recipe) }, {})
         local uri = yocto.get_embedded_uri(recipe, "python")
-        assert.is_true((vim.wait(500, function()
+        wait_until(function()
             local text
             for _, m in ipairs(messages) do
                 local td = m.params and m.params.textDocument
@@ -2445,7 +2445,7 @@ describe("embedded python servers", function()
                 end
             end
             return text == "x = 2\n"
-        end, 10)))
+        end)
     end)
 
     it("does not change the user's lsp config", function()
