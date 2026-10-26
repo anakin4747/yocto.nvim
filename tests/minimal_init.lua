@@ -20,6 +20,9 @@ end
 vim.cmd('runtime plugin/plenary.vim')
 vim.cmd('runtime plugin/yocto.lua')
 
+-- Send buffer changes to servers at once instead of after 150ms.
+vim.lsp.config('*', { flags = { debounce_text_changes = 0 } })
+
 -- Tests use fake servers; real ones are slow to start. Recording fixtures
 -- still needs them, through real_rpc_start. Abort the run: errors raised
 -- here are swallowed by vim.lsp.start callers.
