@@ -31,3 +31,7 @@ Maybe extending this plugin to support running explicit bitbake commands with:
 Support neovim as a terminal provider upstream so that you don't need to use
 tmux for devshells
 
+---
+
+how to record videos at a compressed rate to above post processing to show
+small snippets of features instead of a long demo
