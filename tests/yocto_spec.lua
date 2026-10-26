@@ -107,6 +107,92 @@ end
 
 local DEFAULT_NAMES = { "yocto_bitbake", "yocto_bash", "yocto_python" }
 
+-- Answer of a fake server for requests it never answers.
+local NO_REPLY = {}
+
+-- Reports the exit of a fake server once, like a real process would.
+local function close_fake(state, dispatchers)
+    if state.closing then
+        return
+    end
+    state.closing = true
+    vim.schedule(function()
+        dispatchers.on_exit(0, 0)
+    end)
+end
+
+local function reply_later(server, request)
+    vim.schedule(function()
+        local result = server.answer(request.method, request.params)
+        if result == NO_REPLY then
+            return
+        end
+        request.callback(nil, result)
+        if request.notify_reply_callback then
+            request.notify_reply_callback(request.id)
+        end
+    end)
+end
+
+-- rpc client of an in-process fake server. `server.observe(method, params)`
+-- sees every message when it is sent, `server.answer(method, params)`
+-- returns the result of a request or NO_REPLY and
+-- `server.notify(method, params, dispatchers)` receives notifications.
+local function fake_rpc(dispatchers, server)
+    local state = { closing = false, next_id = 0 }
+    local function request(method, params, callback, notify_reply_callback)
+        state.next_id = state.next_id + 1
+        server.observe(method, params)
+        reply_later(server, {
+            method = method,
+            params = params,
+            callback = callback,
+            id = state.next_id,
+            notify_reply_callback = notify_reply_callback,
+        })
+        return true, state.next_id
+    end
+    local function notify(method, params)
+        server.observe(method, params)
+        server.notify(method, params, dispatchers)
+        if method == "exit" then
+            close_fake(state, dispatchers)
+        end
+        return true
+    end
+    return {
+        request = request,
+        notify = notify,
+        is_closing = function()
+            return state.closing
+        end,
+        terminate = function()
+            close_fake(state, dispatchers)
+        end,
+    }
+end
+
+local function fake_answer(opts, capabilities, method, params)
+    if method == "initialize" then
+        return { capabilities = capabilities }
+    end
+    local handler = opts.handlers and opts.handlers[method]
+    if not handler then
+        return nil
+    end
+    return handler(params)
+end
+
+local function fake_notify(opts, method, params, dispatchers)
+    local handler = opts.notifications and opts.notifications[method]
+    if not handler then
+        return
+    end
+    vim.schedule(function()
+        handler(params, dispatchers)
+    end)
+end
+
 -- In-process fake language server. Records requests and notifications into
 -- `messages`. `opts.handlers[method](params)` answers requests,
 -- `opts.notifications[method](params, dispatchers)` reacts to notifications
@@ -118,57 +204,21 @@ local function fake_cmd(messages, opts)
         { textDocumentSync = { openClose = true, change = 1 } },
         opts.capabilities or {}
     )
-    return function(dispatchers)
-        local closing = false
-        local next_id = 0
-        local function close()
-            if not closing then
-                closing = true
-                vim.schedule(function()
-                    dispatchers.on_exit(0, 0)
-                end)
+    local server = {
+        observe = function(method, params)
+            if messages then
+                table.insert(messages, { method = method, params = params })
             end
-        end
-        return {
-            request = function(method, params, callback, notify_reply_callback)
-                next_id = next_id + 1
-                local id = next_id
-                if messages then
-                    table.insert(messages, { method = method, params = params })
-                end
-                vim.schedule(function()
-                    local result
-                    if method == "initialize" then
-                        result = { capabilities = capabilities }
-                    elseif opts.handlers and opts.handlers[method] then
-                        result = opts.handlers[method](params)
-                    end
-                    callback(nil, result)
-                    if notify_reply_callback then
-                        notify_reply_callback(id)
-                    end
-                end)
-                return true, id
-            end,
-            notify = function(method, params)
-                if messages then
-                    table.insert(messages, { method = method, params = params })
-                end
-                if opts.notifications and opts.notifications[method] then
-                    vim.schedule(function()
-                        opts.notifications[method](params, dispatchers)
-                    end)
-                end
-                if method == "exit" then
-                    close()
-                end
-                return true
-            end,
-            is_closing = function()
-                return closing
-            end,
-            terminate = close,
-        }
+        end,
+        answer = function(method, params)
+            return fake_answer(opts, capabilities, method, params)
+        end,
+        notify = function(method, params, dispatchers)
+            fake_notify(opts, method, params, dispatchers)
+        end,
+    }
+    return function(dispatchers)
+        return fake_rpc(dispatchers, server)
     end
 end
 
@@ -331,62 +381,50 @@ local function record_cmd(session, name, real_cmd)
     end
 end
 
+-- Sends notification if it was recorded after the client message `sent`.
+local function replay_notification(session, dispatchers, notification, sent)
+    if not vim.deep_equal(notification.after, sent) then
+        return
+    end
+    local params = substitute_strings(notification.params, session.from_fixture)
+    vim.schedule(function()
+        dispatchers.notification(notification.method, params)
+    end)
+end
+
 -- Sends the recorded notifications that followed the client message `sent`.
 local function replay_notifications(session, server, dispatchers, sent)
     for _, notification in ipairs(server.notifications) do
-        if vim.deep_equal(notification.after, sent) then
-            local params = substitute_strings(notification.params, session.from_fixture)
-            vim.schedule(function()
-                dispatchers.notification(notification.method, params)
-            end)
-        end
+        replay_notification(session, dispatchers, notification, sent)
     end
 end
 
+-- Recorded result of a request; servers stopped while initializing never
+-- answered initialize.
 local function replay_result(session, server, method, params)
+    if method == "initialize" and not server.initialize then
+        return NO_REPLY
+    end
     local result = method == "initialize" and server.initialize or server.requests[request_key(session, method, params)]
     return substitute_strings(result, session.from_fixture)
-end
-
-local function reply_later(callback, result, id, notify_reply_callback)
-    vim.schedule(function()
-        callback(nil, result)
-        if notify_reply_callback then
-            notify_reply_callback(id)
-        end
-    end)
 end
 
 -- Fake server answering requests with the recorded results for the same
 -- method and params, nil for unrecorded ones.
 local function replay_cmd(session, name)
-    local server = session.servers[name]
-    assert.is_not_nil(server, "no recorded session of " .. name .. " in " .. session.path)
+    local recorded = session.servers[name]
+    assert.is_not_nil(recorded, "no recorded session of " .. name .. " in " .. session.path)
     return function(dispatchers)
-        local state = { counts = {}, closing = false, next_id = 0 }
-        local function request(method, params, callback, notify_reply_callback)
-            state.next_id = state.next_id + 1
-            reply_later(callback, replay_result(session, server, method, params), state.next_id, notify_reply_callback)
-            return true, state.next_id
-        end
-        local function notify(method)
-            replay_notifications(session, server, dispatchers, count_message(state.counts, method))
-            if method == "exit" and not state.closing then
-                state.closing = true
-                vim.schedule(dispatchers.on_exit, 0, 0)
-            end
-            return true
-        end
-        return {
-            request = request,
-            notify = notify,
-            is_closing = function()
-                return state.closing
+        local counts = {}
+        return fake_rpc(dispatchers, {
+            observe = function() end,
+            answer = function(method, params)
+                return replay_result(session, recorded, method, params)
             end,
-            terminate = function()
-                state.closing = true
+            notify = function(method)
+                replay_notifications(session, recorded, dispatchers, count_message(counts, method))
             end,
-        }
+        })
     end
 end
 
@@ -1163,102 +1201,129 @@ describe("embedded proxy client", function()
     local GENERATED = range(0, 0, 0, 3) -- embedded "def", no recipe text
     local OS_URI = "file:///usr/lib/python3/os.py"
 
-    -- Fake bitbake server reporting `language` everywhere, fake server for
-    -- the `embedded` language (default python) answering hover with `hover`,
-    -- and that language's fixture as embedded doc.
-    local function start_servers(opts)
-        local python_messages = {}
-        embedded = opts.embedded or "python"
-        local fixture = FIXTURES[embedded]
+    local function set_recipe_lines(opts)
         if embedded == "bash" then
             vim.api.nvim_buf_set_lines(recipe_buf, 0, -1, false, BASH_RECIPE)
         end
         if opts.recipe then
             vim.api.nvim_buf_set_lines(recipe_buf, 0, -1, false, opts.recipe)
         end
+    end
+
+    -- Fake bitbake server reporting opts.language everywhere.
+    local function start_bitbake_server(opts)
+        local handlers = vim.tbl_extend("force", {
+            ["bitbake/requestEmbeddedLanguageDocInfos"] = function()
+                return opts.language
+            end,
+        }, opts.bitbake_handlers or {})
         -- Assigned, not merged, so root and settings do not leak between tests.
         vim.lsp.config["user_bitbake"] = {
-            cmd = fake_cmd(opts.bitbake_messages, {
-                capabilities = { definitionProvider = true },
-                handlers = vim.tbl_extend("force", {
-                    ["bitbake/requestEmbeddedLanguageDocInfos"] = function()
-                        return opts.language
-                    end,
-                }, opts.bitbake_handlers or {}),
-            }),
+            cmd = fake_cmd(opts.bitbake_messages, { capabilities = { definitionProvider = true }, handlers = handlers }),
             filetypes = { "bitbake" },
             root_dir = opts.bitbake_root,
             settings = opts.bitbake_settings,
         }
         vim.lsp.enable("user_bitbake")
-        if opts.python ~= false then
-            local handlers = {
-                ["textDocument/hover"] = function()
-                    return opts.hover
-                end,
-            }
-            -- "EMBEDDED" in results stands for the embedded doc uri.
-            local function substitute(value)
-                if value == "EMBEDDED" then
-                    return embedded_uri()
-                elseif type(value) == "table" then
-                    local copy = {}
-                    for k, v in pairs(value) do
-                        copy[substitute(k)] = substitute(v)
-                    end
-                    return copy
-                end
-                return value
-            end
-            for method, result in pairs(opts.results or {}) do
-                handlers[method] = function()
-                    return substitute(result)
-                end
-            end
-            -- Publish opts.diagnostics[n] for the n-th version of the doc, or
-            -- with opts.pull only answer textDocument/diagnostic with them.
-            local published = 0
-            local capabilities = { hoverProvider = true }
-            if opts.pull then
-                capabilities.diagnosticProvider = { interFileDependencies = false, workspaceDiagnostics = false }
-                handlers["textDocument/diagnostic"] = function()
-                    return { kind = "full", items = opts.diagnostics[published] or {} }
-                end
-            end
-            local function publish(params, dispatchers)
-                published = published + 1
-                local diagnostics = opts.diagnostics and opts.diagnostics[published]
-                if diagnostics and not opts.pull then
-                    dispatchers.notification("textDocument/publishDiagnostics", {
-                        uri = params.textDocument.uri,
-                        diagnostics = diagnostics,
-                    })
-                end
-            end
-            vim.lsp.config[fixture.server] = {
-                cmd = fake_cmd(python_messages, {
-                    capabilities = vim.tbl_extend("force", capabilities, opts.capabilities or {}),
-                    handlers = handlers,
-                    notifications = {
-                        ["textDocument/didOpen"] = publish,
-                        ["textDocument/didChange"] = publish,
-                    },
-                }),
-                filetypes = { fixture.filetype },
-            }
-            vim.lsp.enable(fixture.server)
-        end
+    end
 
+    -- Handler answering with result, where "EMBEDDED" stands for the
+    -- embedded doc uri.
+    local function result_handler(result)
+        return function()
+            return substitute_strings(result, { { "EMBEDDED", embedded_uri() } })
+        end
+    end
+
+    -- Embedded server request handlers: hover answers opts.hover and
+    -- opts.results[method] answers method.
+    local function embedded_handlers(opts)
+        local handlers = { ["textDocument/hover"] = result_handler(opts.hover) }
+        for method, result in pairs(opts.results or {}) do
+            handlers[method] = result_handler(result)
+        end
+        return handlers
+    end
+
+    -- Counts versions of the embedded doc in diagnostics.version and
+    -- publishes opts.diagnostics[n] for the n-th one unless opts.pull.
+    local function publisher(opts, diagnostics)
+        return function(params, dispatchers)
+            diagnostics.version = diagnostics.version + 1
+            local items = opts.diagnostics and opts.diagnostics[diagnostics.version]
+            if not items or opts.pull then
+                return
+            end
+            dispatchers.notification("textDocument/publishDiagnostics", {
+                uri = params.textDocument.uri,
+                diagnostics = items,
+            })
+        end
+    end
+
+    -- With opts.pull, makes the server answer textDocument/diagnostic with
+    -- the diagnostics of the current version instead of publishing them.
+    local function add_pull_diagnostics(opts, diagnostics, handlers, capabilities)
+        if not opts.pull then
+            return
+        end
+        capabilities.diagnosticProvider = { interFileDependencies = false, workspaceDiagnostics = false }
+        handlers["textDocument/diagnostic"] = function()
+            return { kind = "full", items = opts.diagnostics[diagnostics.version] or {} }
+        end
+    end
+
+    -- Fake server for the embedded language recording its messages.
+    local function start_embedded_server(opts, fixture, messages)
+        local diagnostics = { version = 0 }
+        local handlers = embedded_handlers(opts)
+        local capabilities = { hoverProvider = true }
+        add_pull_diagnostics(opts, diagnostics, handlers, capabilities)
+        local publish = publisher(opts, diagnostics)
+        vim.lsp.config[fixture.server] = {
+            cmd = fake_cmd(messages, {
+                capabilities = vim.tbl_extend("force", capabilities, opts.capabilities or {}),
+                handlers = handlers,
+                notifications = { ["textDocument/didOpen"] = publish, ["textDocument/didChange"] = publish },
+            }),
+            filetypes = { fixture.filetype },
+        }
+        vim.lsp.enable(fixture.server)
+    end
+
+    local function servers_attached(opts, fixture)
+        if not proxy_client(recipe_buf) then
+            return false
+        end
+        if #vim.lsp.get_clients({ bufnr = recipe_buf, name = "user_bitbake" }) ~= 1 then
+            return false
+        end
+        if opts.python == false then
+            return true
+        end
+        local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(embedded_uri()))
+        return #vim.lsp.get_clients({ bufnr = embedded_buf, name = fixture.server }) == 1
+    end
+
+    -- Fake bitbake server reporting `language` everywhere, fake server for
+    -- the `embedded` language (default python) answering hover with `hover`,
+    -- and that language's fixture as embedded doc. Returns the messages sent
+    -- to the embedded server.
+    local function start_servers(opts)
+        local messages = {}
+        embedded = opts.embedded or "python"
+        local fixture = FIXTURES[embedded]
+        set_recipe_lines(opts)
+        start_bitbake_server(opts)
+        if opts.python ~= false then
+            start_embedded_server(opts, fixture, messages)
+        end
         vim.bo[recipe_buf].filetype = "bitbake"
         yocto.handler(nil, { doc(embedded, table.concat(fixture.lines, "\n"), fixture.indexes) }, {})
-        local embedded_buf = vim.fn.bufnr(vim.uri_to_fname(embedded_uri()))
         wait_until(function()
-            return proxy_client(recipe_buf) ~= nil
-                and #vim.lsp.get_clients({ bufnr = recipe_buf, name = "user_bitbake" }) == 1
-                and (opts.python == false
-                    or #vim.lsp.get_clients({ bufnr = embedded_buf, name = fixture.server }) == 1)
+            return servers_attached(opts, fixture)
         end)
-        return python_messages
+        return messages
     end
 
     local function requests_for(messages, method)
