@@ -1,15 +1,4 @@
 
-React to the general LSP command that is sent from language-server-bitbake to
-get python and bash aware features
-
-
----
-
-Essentially re-writing parts of the vscode-bitbake extension client side logic
-in a neovim plugin
-
----
-
 Clean up when a recipe is closed: wipe its hidden embedded buffers, stop
 language servers left with no buffers and forget its recorded docs. Today they
 live until neovim exits.
@@ -24,3 +13,21 @@ paths and correct "defined on line N" to the recipe's line numbers.
 
 Go to definition of python functions searches inherited classes and the
 classes-global of bblayers.conf layers: also search require/include files.
+
+---
+
+python diagnostics don't show up
+
+---
+
+Maybe extending this plugin to support running explicit bitbake commands with:
+
+```vim
+:Bitbake
+```
+
+---
+
+Support neovim as a terminal provider upstream so that you don't need to use
+tmux for devshells
+
