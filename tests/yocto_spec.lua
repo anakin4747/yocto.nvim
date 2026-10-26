@@ -980,12 +980,20 @@ describe("embedded proxy client", function()
                     return substitute(result)
                 end
             end
-            -- Publish opts.diagnostics[n] for the n-th version of the doc.
+            -- Publish opts.diagnostics[n] for the n-th version of the doc, or
+            -- with opts.pull only answer textDocument/diagnostic with them.
             local published = 0
+            local capabilities = { hoverProvider = true }
+            if opts.pull then
+                capabilities.diagnosticProvider = { interFileDependencies = false, workspaceDiagnostics = false }
+                handlers["textDocument/diagnostic"] = function()
+                    return { kind = "full", items = opts.diagnostics[published] or {} }
+                end
+            end
             local function publish(params, dispatchers)
                 published = published + 1
                 local diagnostics = opts.diagnostics and opts.diagnostics[published]
-                if diagnostics then
+                if diagnostics and not opts.pull then
                     dispatchers.notification("textDocument/publishDiagnostics", {
                         uri = params.textDocument.uri,
                         diagnostics = diagnostics,
@@ -994,7 +1002,7 @@ describe("embedded proxy client", function()
             end
             vim.lsp.config[fixture.server] = {
                 cmd = fake_cmd(python_messages, {
-                    capabilities = vim.tbl_extend("force", { hoverProvider = true }, opts.capabilities or {}),
+                    capabilities = vim.tbl_extend("force", capabilities, opts.capabilities or {}),
                     handlers = handlers,
                     notifications = {
                         ["textDocument/didOpen"] = publish,
@@ -1585,6 +1593,44 @@ describe("embedded proxy client", function()
             recipe_diagnostics(1)
             yocto.handler(nil, { doc("python", table.concat(EMBEDDED, "\n"), INDEXES) }, {})
             assert.are.equal(0, #recipe_diagnostics(0))
+        end)
+
+        describe("from servers that are only pulled", function()
+            it("shows embedded diagnostics on the recipe at the mapped range", function()
+                start_servers({ language = "python", pull = true, diagnostics = { { lsp_diagnostic(HEADER, "bad name") } } })
+                local diagnostics = recipe_diagnostics(1)
+                assert.are.equal("bad name", diagnostics[1].message)
+                assert.are.same({ 0, 7, 0, 12 }, {
+                    diagnostics[1].lnum,
+                    diagnostics[1].col,
+                    diagnostics[1].end_lnum,
+                    diagnostics[1].end_col,
+                })
+            end)
+
+            it("pulls again when the embedded doc changes", function()
+                start_servers({
+                    language = "python",
+                    pull = true,
+                    diagnostics = { { lsp_diagnostic(MAPPED, "old") }, { lsp_diagnostic(MAPPED, "new") } },
+                })
+                assert.are.equal("old", recipe_diagnostics(1)[1].message)
+                yocto.handler(nil, { doc("python", table.concat(EMBEDDED, "\n"), INDEXES) }, {})
+                wait_until(function()
+                    local diagnostics = vim.diagnostic.get(recipe_buf)
+                    return #diagnostics == 1 and diagnostics[1].message == "new"
+                end, 10)
+            end)
+
+            it("shows embedded bash diagnostics on the recipe", function()
+                start_servers({
+                    language = "bash",
+                    embedded = "bash",
+                    pull = true,
+                    diagnostics = { { lsp_diagnostic(MAPPED, "bash") } },
+                })
+                assert.are.equal("bash", recipe_diagnostics(1)[1].message)
+            end)
         end)
     end)
 

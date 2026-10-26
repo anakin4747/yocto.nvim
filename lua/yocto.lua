@@ -74,6 +74,17 @@ local function start_python_servers(bufnr, original_uri)
     end
 end
 
+-- Pull diagnostics of an embedded buffer from servers that only answer
+-- textDocument/diagnostic (e.g. zubanls). Neovim only pulls for buffers shown
+-- in a window and embedded buffers never are. No public API does this, so
+-- the private one is used; tests cover it against API changes.
+local function refresh_diagnostics(bufnr)
+    local ok, err = pcall(vim.lsp.diagnostic._refresh, bufnr)
+    if not ok then
+        vim.lsp.log.error("yocto: failed to pull diagnostics: " .. tostring(err))
+    end
+end
+
 -- Keep the embedded file loaded in a hidden buffer so language servers for
 -- its filetype attach to it and receive its updates. Python buffers are
 -- excluded from vim.lsp.enable (buftype) and get per-project servers instead.
@@ -84,10 +95,17 @@ local function sync_buffer(path, lines, language, original_uri)
     if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
         vim.bo[bufnr].modified = false
+        refresh_diagnostics(bufnr)
         return
     end
     bufnr = vim.fn.bufadd(path)
     vim.bo[bufnr].buflisted = false
+    vim.api.nvim_create_autocmd("LspAttach", {
+        buffer = bufnr,
+        callback = function()
+            refresh_diagnostics(bufnr)
+        end,
+    })
     if language == "python" then
         vim.bo[bufnr].buftype = "nowrite"
     end
