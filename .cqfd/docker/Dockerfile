@@ -8,18 +8,8 @@ RUN pacman -Syu --noconfirm \
     jq \
     make \
     neovim \
-    nodejs \
-    npm \
-    python-pip \
     sudo \
     which
-
-RUN pip install --break-system-packages zuban
-
-RUN npm install --global \
-    bash-language-server \
-    language-server-bitbake \
-    pyright
 
 COPY plenary-patches /plenary-patches
 
