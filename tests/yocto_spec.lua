@@ -2612,10 +2612,12 @@ describe("oelint output parsing", function()
 end)
 
 describe("oelint", function()
-    local oelint, dir, bufnr, name, executable_mocks, system, executable
+    local oelint, dir, bufnr, name, executable_mocks, system, executable, cmd
 
     before_each(function()
         oelint = require("yocto.oelint")
+        cmd = oelint.cmd
+        oelint.cmd = "oelint-adv"
         system = vim.system
         executable = vim.fn.executable
         executable_mocks = {
@@ -2639,6 +2641,7 @@ describe("oelint", function()
 
     after_each(function()
         oelint.stop()
+        oelint.cmd = cmd
         vim.system = system
         vim.fn.executable = executable
         vim.api.nvim_buf_delete(bufnr, { force = true })

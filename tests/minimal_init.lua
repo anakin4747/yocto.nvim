@@ -32,4 +32,16 @@ vim.lsp.rpc.start = function(cmd)
     vim.cmd('cquit 1')
 end
 
+-- Buffers becoming bitbake buffers start oelint-adv, which is slow and may
+-- be installed. Tests that need it fake vim.system and set oelint.cmd.
+require('yocto.oelint').cmd = 'oelint-adv-disabled-in-tests'
+local system = vim.system
+vim.system = function(cmd, ...)
+    if cmd[1] == 'oelint-adv' then
+        io.stderr:write('tests must not run oelint-adv: ' .. table.concat(cmd, ' ') .. '\n')
+        vim.cmd('cquit 1')
+    end
+    return system(cmd, ...)
+end
+
 vim.g.i_am_in_a_test = true
