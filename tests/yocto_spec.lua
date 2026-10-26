@@ -254,7 +254,7 @@ describe("embedded language docs handler", function()
         assert.are.equal("x = 1", readfile_from_uri(yocto.get_embedded_uri(ORIG, "python")))
     end)
 
-    it("places files in the project directory of the recipe", function()
+    it("groups embedded docs of a Yocto project in one temp directory", function()
         yocto.handler(nil, { doc("bash", "echo hi") }, {})
         local path = vim.uri_to_fname(yocto.get_embedded_uri(ORIG, "bash"))
         assert.are.equal(yocto.project_dir(ORIG), vim.fs.dirname(path))
