@@ -442,8 +442,8 @@ end
 -- Signature and the comment blocks right above a shell function whose
 -- definition is at line lnum and at the top of its body.
 LANGUAGES.bash.doc = function(lines, lnum)
-    local function is_comment(i)
-        return lines[i] ~= nil and lines[i]:match("^%s*#") ~= nil
+    local function is_comment(line_number)
+        return lines[line_number] ~= nil and lines[line_number]:match("^%s*#") ~= nil
     end
     local above = lnum
     while is_comment(above - 1) do

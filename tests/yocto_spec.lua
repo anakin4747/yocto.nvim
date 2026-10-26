@@ -239,8 +239,8 @@ local function pos(line, character)
     return { line = line, character = character }
 end
 
-local function range(sl, sc, el, ec)
-    return { start = pos(sl, sc), ["end"] = pos(el, ec) }
+local function range(start_line, start_character, end_line, end_character)
+    return { start = pos(start_line, start_character), ["end"] = pos(end_line, end_character) }
 end
 
 local function proxy_client(bufnr)
@@ -310,8 +310,8 @@ local function substitute_strings(value, replacements)
 end
 
 local function longest_first(replacements)
-    table.sort(replacements, function(a, b)
-        return #a[1] > #b[1]
+    table.sort(replacements, function(left, right)
+        return #left[1] > #right[1]
     end)
     return replacements
 end
@@ -663,9 +663,9 @@ end)
 describe("language server selection", function()
     local buf
 
-    local function open_with_filetype(ft)
+    local function open_with_filetype(filetype)
         buf = vim.api.nvim_create_buf(true, false)
-        vim.bo[buf].filetype = ft
+        vim.bo[buf].filetype = filetype
     end
 
     before_each(function()
@@ -1327,8 +1327,8 @@ describe("embedded proxy client", function()
     end
 
     local function requests_for(messages, method)
-        return vim.tbl_filter(function(m)
-            return m.method == method
+        return vim.tbl_filter(function(message)
+            return message.method == method
         end, messages)
     end
 
@@ -1849,8 +1849,8 @@ describe("embedded proxy client", function()
     end)
 
     describe("diagnostics", function()
-        local function lsp_diagnostic(r, message)
-            return { range = r, message = message, severity = 2, source = "fake" }
+        local function lsp_diagnostic(diagnostic_range, message)
+            return { range = diagnostic_range, message = message, severity = 2, source = "fake" }
         end
 
         local function recipe_diagnostics(count)
@@ -2047,8 +2047,8 @@ describe("bitbake project settings", function()
         recipe_buf = vim.fn.bufadd(path)
         vim.fn.bufload(recipe_buf)
         wait_until(function()
-            return #vim.tbl_filter(function(m)
-                return m.method == "workspace/didChangeConfiguration"
+            return #vim.tbl_filter(function(message)
+                return message.method == "workspace/didChangeConfiguration"
             end, messages) > 0
         end)
     end
