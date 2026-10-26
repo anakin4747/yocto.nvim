@@ -1,6 +1,7 @@
 
 .PHONY: cqfd
 cqfd:
+	@# @./scripts/cqfd init > /dev/null
 	@./scripts/cqfd run make tests
 
 .PHONY: test tests
