@@ -1,6 +1,11 @@
 vim.opt.swapfile = false
 -- Test files are temporary; do not wait for them to reach the disk.
 vim.opt.fsync = false
+-- Detect filetypes but load no syntax, indent or ftplugin files for them:
+-- embedded buffers get a filetype in nearly every test.
+vim.cmd('syntax off')
+vim.cmd('filetype on')
+vim.cmd('filetype plugin indent off')
 vim.opt.runtimepath:append('.')
 
 local plenary_dirs = {
