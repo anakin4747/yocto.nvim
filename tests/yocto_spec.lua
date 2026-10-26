@@ -235,6 +235,17 @@ local function stop_servers()
     end)
 end
 
+-- Register the default configs with fake servers, so tests never start the
+-- real language servers.
+local function register_fake_defaults()
+    yocto.register_defaults()
+    for _, name in ipairs(DEFAULT_NAMES) do
+        vim.lsp.config(name, { cmd = fake_cmd() })
+    end
+end
+
+register_fake_defaults()
+
 local function pos(line, character)
     return { line = line, character = character }
 end
@@ -492,7 +503,7 @@ local function restore_servers()
     vim.lsp.config.yocto_bitbake = {}
     vim.lsp.config.yocto_bash = {}
     vim.lsp.config.user_python = {}
-    yocto.register_defaults()
+    register_fake_defaults()
 end
 
 describe("embedded language docs handler", function()
@@ -673,7 +684,7 @@ describe("language server selection", function()
         for _, name in ipairs(DEFAULT_NAMES) do
             vim.lsp.config[name] = {}
         end
-        yocto.register_defaults()
+        register_fake_defaults()
     end)
 
     after_each(function()
@@ -2071,7 +2082,7 @@ describe("bitbake project settings", function()
     after_each(function()
         stop_servers()
         vim.lsp.config.yocto_bitbake = {}
-        yocto.register_defaults()
+        register_fake_defaults()
         remove_storage(yocto.storage_dir)
         if recipe_buf then
             vim.api.nvim_buf_delete(recipe_buf, { force = true })
