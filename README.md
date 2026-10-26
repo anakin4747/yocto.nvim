@@ -26,8 +26,8 @@ vim.pack.add('https://github.com/anakin4747/yocto.nvim')
 
 ## Config
 
-Your own `vim.lsp.config` servers for `bitbake`, `sh` and `python` are used
-when enabled; otherwise `yocto_bitbake`, `yocto_bash` and `yocto_python`
+Your own `vim.lsp.config` server configs for `bitbake`, `sh` and `python` are
+used when enabled; otherwise `yocto_bitbake`, `yocto_bash` and `yocto_python`
 fallbacks are started. So any `python` or `sh` server can be used.
 
 ### Global Config
