@@ -222,6 +222,241 @@ local function temp_tree()
     end
 end
 
+-- Recorded language server sessions live in tests/fixtures/lsp/<name>.json.
+-- A test replays its file through fake servers; when the file is missing,
+-- the test runs the real servers once and records it. Delete a file to
+-- record it again. Run specific strings such as temp paths are recorded as
+-- placeholders.
+
+-- Server notifications that tests never depend on and that vary between runs.
+local UNRECORDED_NOTIFICATIONS = {
+    ["$/progress"] = true,
+    ["telemetry/event"] = true,
+    ["window/logMessage"] = true,
+    ["window/showMessage"] = true,
+}
+
+local function replace_all(str, replacements)
+    for _, pair in ipairs(replacements) do
+        str = str:gsub(vim.pesc(pair[1]), (pair[2]:gsub("%%", "%%%%")))
+    end
+    return str
+end
+
+-- Copy of value with replacements, a list of { from, to } pairs, applied to
+-- its strings and keys.
+local function substitute_strings(value, replacements)
+    if type(value) == "string" then
+        return replace_all(value, replacements)
+    end
+    if type(value) ~= "table" then
+        return value
+    end
+    local copy = {}
+    for k, v in pairs(value) do
+        copy[substitute_strings(k, replacements)] = substitute_strings(v, replacements)
+    end
+    return setmetatable(copy, getmetatable(value))
+end
+
+local function longest_first(replacements)
+    table.sort(replacements, function(a, b)
+        return #a[1] > #b[1]
+    end)
+    return replacements
+end
+
+-- Count of each method sent so far, for matching recorded notifications.
+local function count_message(counts, method)
+    counts[method] = (counts[method] or 0) + 1
+    return { method = method, n = counts[method] }
+end
+
+-- Key of a recorded request result: the method and its params with
+-- placeholders.
+local function request_key(session, method, params)
+    local fixture_params = substitute_strings(params, session.to_fixture) or vim.NIL
+    return method .. " " .. vim.json.encode(fixture_params, { sort_keys = true })
+end
+
+-- Records a server notification after the last notification the client sent.
+local function record_notification(session, server, state, method, params)
+    if UNRECORDED_NOTIFICATIONS[method] then
+        return
+    end
+    table.insert(server.notifications, {
+        after = state.last,
+        method = method,
+        params = substitute_strings(params, session.to_fixture),
+    })
+end
+
+local function record_result(session, server, method, key, err, result)
+    if method == "initialize" then
+        server.initialize = substitute_strings(result, session.to_fixture)
+    elseif not err and result ~= nil then
+        server.requests[key] = substitute_strings(result, session.to_fixture)
+    end
+end
+
+-- rpc client of a real server that records its replies into server.
+local function recording_rpc(session, server, state, rpc)
+    local function request(method, params, callback, notify_reply_callback)
+        local key = request_key(session, method, params)
+        return rpc.request(method, params, function(err, result)
+            record_result(session, server, method, key, err, result)
+            callback(err, result)
+        end, notify_reply_callback)
+    end
+    local function notify(method, params)
+        state.last = count_message(state.counts, method)
+        return rpc.notify(method, params)
+    end
+    return setmetatable({ request = request, notify = notify }, { __index = rpc })
+end
+
+local function record_cmd(session, name, real_cmd)
+    return function(dispatchers, config)
+        local server = { requests = {}, notifications = {} }
+        session.servers[name] = server
+        local state = { counts = {} }
+        local recording_dispatchers = setmetatable({
+            notification = function(method, params)
+                record_notification(session, server, state, method, params)
+                return dispatchers.notification(method, params)
+            end,
+        }, { __index = dispatchers })
+        local rpc = vim.lsp.rpc.start(real_cmd, recording_dispatchers, { cwd = config.cmd_cwd, env = config.cmd_env })
+        return recording_rpc(session, server, state, rpc)
+    end
+end
+
+-- Sends the recorded notifications that followed the client message `sent`.
+local function replay_notifications(session, server, dispatchers, sent)
+    for _, notification in ipairs(server.notifications) do
+        if vim.deep_equal(notification.after, sent) then
+            local params = substitute_strings(notification.params, session.from_fixture)
+            vim.schedule(function()
+                dispatchers.notification(notification.method, params)
+            end)
+        end
+    end
+end
+
+local function replay_result(session, server, method, params)
+    local result = method == "initialize" and server.initialize or server.requests[request_key(session, method, params)]
+    return substitute_strings(result, session.from_fixture)
+end
+
+local function reply_later(callback, result, id, notify_reply_callback)
+    vim.schedule(function()
+        callback(nil, result)
+        if notify_reply_callback then
+            notify_reply_callback(id)
+        end
+    end)
+end
+
+-- Fake server answering requests with the recorded results for the same
+-- method and params, nil for unrecorded ones.
+local function replay_cmd(session, name)
+    local server = session.servers[name]
+    assert.is_not_nil(server, "no recorded session of " .. name .. " in " .. session.path)
+    return function(dispatchers)
+        local state = { counts = {}, closing = false, next_id = 0 }
+        local function request(method, params, callback, notify_reply_callback)
+            state.next_id = state.next_id + 1
+            reply_later(callback, replay_result(session, server, method, params), state.next_id, notify_reply_callback)
+            return true, state.next_id
+        end
+        local function notify(method)
+            replay_notifications(session, server, dispatchers, count_message(state.counts, method))
+            if method == "exit" and not state.closing then
+                state.closing = true
+                vim.schedule(dispatchers.on_exit, 0, 0)
+            end
+            return true
+        end
+        return {
+            request = request,
+            notify = notify,
+            is_closing = function()
+                return state.closing
+            end,
+            terminate = function()
+                state.closing = true
+            end,
+        }
+    end
+end
+
+local function read_fixture(path)
+    local json = table.concat(vim.fn.readfile(path), "\n")
+    return vim.json.decode(json, { luanil = { object = true, array = true } })
+end
+
+-- Session of fixture `name`; placeholders maps run specific strings to the
+-- names they are recorded as.
+local function lsp_session(name, placeholders)
+    local session = { path = vim.fs.joinpath("tests", "fixtures", "lsp", name .. ".json") }
+    session.recording = vim.fn.filereadable(session.path) == 0
+    session.servers = session.recording and {} or read_fixture(session.path)
+    session.to_fixture, session.from_fixture = {}, {}
+    for from, to in pairs(placeholders) do
+        table.insert(session.to_fixture, { from, to })
+        table.insert(session.from_fixture, { to, from })
+    end
+    longest_first(session.to_fixture)
+    longest_first(session.from_fixture)
+    return session
+end
+
+-- lsp cmd of server `name`: real_cmd while recording, its recording otherwise.
+local function session_cmd(session, name, real_cmd)
+    if session.recording then
+        return record_cmd(session, name, real_cmd)
+    end
+    return replay_cmd(session, name)
+end
+
+local function save_session(session)
+    if not session.recording then
+        return
+    end
+    vim.fn.mkdir(vim.fs.dirname(session.path), "p")
+    local json = vim.json.encode(session.servers, { indent = "  ", sort_keys = true })
+    vim.fn.writefile(vim.split(json, "\n", { plain = true }), session.path)
+end
+
+-- Placeholders for the temp paths of a recipe in temp tree root.
+local function recipe_placeholders(root, recipe_uri)
+    return {
+        [yocto.project_dir(recipe_uri)] = "$PROJECT_DIR",
+        [vim.fn.sha256(recipe_uri)] = "$RECIPE_HASH",
+        [yocto.storage_dir] = "$STORAGE_DIR",
+        [root] = "$ROOT",
+    }
+end
+
+-- Replace the default bitbake and bash servers and the user python server
+-- with the servers of session, recorded from the real ones.
+local function use_recorded_servers(session)
+    vim.lsp.config("yocto_bitbake", { cmd = session_cmd(session, "yocto_bitbake", { "language-server-bitbake", "--stdio" }) })
+    vim.lsp.config("yocto_bash", { cmd = session_cmd(session, "yocto_bash", { "bash-language-server", "start" }) })
+    vim.lsp.config("user_python", {
+        cmd = session_cmd(session, "user_python", { "zuban", "server" }),
+        filetypes = { "python" },
+    })
+    vim.lsp.enable("user_python")
+end
+
+local function restore_servers()
+    vim.lsp.config.yocto_bitbake = {}
+    vim.lsp.config.yocto_bash = {}
+    vim.lsp.config.user_python = {}
+    yocto.register_defaults()
+end
+
 describe("embedded language docs handler", function()
     local dir
 
@@ -1670,8 +1905,8 @@ describe("default storage_dir", function()
     end)
 end)
 
-describe("with real language servers", function()
-    local dir, recipe_buf, recipe_uri
+describe("with recorded language servers", function()
+    local dir, recipe_buf, recipe_uri, session
 
     local REAL_RECIPE = {
         'SUMMARY = "foo"',
@@ -1684,7 +1919,7 @@ describe("with real language servers", function()
         "}",
     }
 
-    -- Language servers may answer nothing until they finished indexing.
+    -- Real language servers may answer nothing until they finished indexing.
     local function eventual_hover(position)
         local result
         vim.wait(500, function()
@@ -1694,6 +1929,18 @@ describe("with real language servers", function()
         return result
     end
 
+    -- Opens the recipe with the servers recorded in fixture `name`.
+    local function open_recipe(name)
+        session = lsp_session(name, recipe_placeholders(dir, recipe_uri))
+        use_recorded_servers(session)
+        vim.fn.bufload(recipe_buf)
+        assert.are.equal("bitbake", vim.bo[recipe_buf].filetype)
+        wait_until(function()
+            return yocto.get_embedded_uri(recipe_uri, "bash") ~= nil
+                and yocto.get_embedded_uri(recipe_uri, "python") ~= nil
+        end, 10)
+    end
+
     before_each(function()
         yocto.storage_dir = vim.fn.tempname()
         local write
@@ -1701,32 +1948,26 @@ describe("with real language servers", function()
         local path = write("foo_1.0.bb", REAL_RECIPE)
         recipe_uri = vim.uri_from_fname(path)
         recipe_buf = vim.fn.bufadd(path)
-        -- zubanls starts much faster than pyright.
-        vim.lsp.config("user_python", { cmd = { "zuban", "server" }, filetypes = { "python" } })
-        vim.lsp.enable("user_python")
-        vim.fn.bufload(recipe_buf)
-        assert.are.equal("bitbake", vim.bo[recipe_buf].filetype)
-        assert.is_true((vim.wait(500, function()
-            return yocto.get_embedded_uri(recipe_uri, "bash") ~= nil
-                and yocto.get_embedded_uri(recipe_uri, "python") ~= nil
-        end, 10)))
     end)
 
     after_each(function()
+        save_session(session)
         stop_servers()
-        vim.lsp.config.user_python = {}
+        restore_servers()
         remove_storage(yocto.storage_dir)
         vim.api.nvim_buf_delete(recipe_buf, { force = true })
         vim.fn.delete(dir, "rf")
     end)
 
     it("hovers bash code through bash-language-server", function()
+        open_recipe("hover_bash")
         local result = eventual_hover(pos(2, 5))
         assert.is_not_nil(result)
         assert.is_not_nil(result.contents)
     end)
 
     it("hovers python code through zubanls", function()
+        open_recipe("hover_python")
         local result = eventual_hover(pos(6, 5))
         assert.is_not_nil(result)
         assert.is_not_nil(result.contents)
@@ -2148,14 +2389,23 @@ describe("embedded python servers", function()
     end)
 end)
 
-describe("real python servers find bitbake modules of the project", function()
-    -- pyright takes over a second to start; its paths are covered by the
-    -- settings tests with a fake server.
-    local SERVERS = {
-        { name = "zubanls", cmd = { "zuban", "server" } },
-    }
+describe("python servers find bitbake modules of the project", function()
+    local root, write, recipe_buf, recipe_uri, session
 
-    local root, write, recipe_buf, recipe_uri
+    -- Opens the recipe with the servers recorded in fixture `name`.
+    local function open_recipe(name)
+        session = lsp_session(name, recipe_placeholders(root, recipe_uri))
+        use_recorded_servers(session)
+        vim.fn.bufload(recipe_buf)
+    end
+
+    -- Sends method at position through the proxy until accept(result) holds;
+    -- real python servers answer nothing until they finished indexing.
+    local function eventual_request(method, position, accept)
+        vim.wait(500, function()
+            return accept(proxy_client(recipe_buf) and proxy_request(recipe_buf, method, position))
+        end, 50)
+    end
 
     before_each(function()
         yocto.storage_dir = vim.fn.tempname()
@@ -2176,63 +2426,46 @@ describe("real python servers find bitbake modules of the project", function()
     end)
 
     after_each(function()
+        save_session(session)
         stop_servers()
-        vim.lsp.config.user_python = {}
+        restore_servers()
         remove_storage(yocto.storage_dir)
         vim.api.nvim_buf_delete(recipe_buf, { force = true })
         vim.fn.delete(root, "rf")
     end)
 
-    for _, server in ipairs(SERVERS) do
-        it("resolves bb with " .. server.name, function()
-            vim.lsp.config("user_python", {
-                cmd = server.cmd,
-                filetypes = { "python" },
-                root_markers = { ".git" },
-            })
-            vim.lsp.enable("user_python")
-            vim.fn.bufload(recipe_buf)
-
-            local contents
-            vim.wait(500, function()
-                local result = proxy_client(recipe_buf) and proxy_request(recipe_buf, "textDocument/hover", pos(2, 8))
-                contents = result and vim.inspect(result.contents)
-                return contents ~= nil and contents:find("yocto test doc", 1, true) ~= nil
-            end, 50)
-            assert.is_not_nil(contents and contents:find("yocto test doc", 1, true))
+    it("resolves bb", function()
+        open_recipe("resolve_bb")
+        local contents
+        eventual_request("textDocument/hover", pos(2, 8), function(result)
+            contents = result and vim.inspect(result.contents)
+            return contents ~= nil and contents:find("yocto test doc", 1, true) ~= nil
         end)
+        assert.is_not_nil(contents and contents:find("yocto test doc", 1, true))
+    end)
 
-        it("jumps to bb definitions with " .. server.name, function()
-            vim.lsp.config("user_python", { cmd = server.cmd, filetypes = { "python" } })
-            vim.lsp.enable("user_python")
-            vim.fn.bufload(recipe_buf)
-
-            local target
-            vim.wait(500, function()
-                local result = proxy_client(recipe_buf) and proxy_request(recipe_buf, "textDocument/definition", pos(2, 8))
-                local location = result and (result[1] or result)
-                target = location and (location.uri or location.targetUri)
-                return target ~= nil
-            end, 50)
-            assert.is_not_nil(target and target:find("bitbake/lib/bb/__init__.py", 1, true))
+    it("jumps to bb definitions", function()
+        open_recipe("define_bb")
+        local target
+        eventual_request("textDocument/definition", pos(2, 8), function(result)
+            local location = result and (result[1] or result)
+            target = location and (location.uri or location.targetUri)
+            return target ~= nil
         end)
+        assert.are.equal(vim.uri_from_fname(vim.fs.joinpath(root, "sources/poky/bitbake/lib/bb/__init__.py")), target)
+    end)
 
-        it("completes bb members with " .. server.name, function()
-            vim.lsp.config("user_python", { cmd = server.cmd, filetypes = { "python" } })
-            vim.lsp.enable("user_python")
-            vim.fn.bufload(recipe_buf)
-
-            local labels = {}
-            vim.wait(500, function()
-                local result = proxy_client(recipe_buf) and proxy_request(recipe_buf, "textDocument/completion", pos(2, 7))
-                for _, item in ipairs(result and (result.items or result) or {}) do
-                    labels[item.label] = true
-                end
-                return labels.note ~= nil
-            end, 50)
-            assert.is_true(labels.note)
+    it("completes bb members", function()
+        open_recipe("complete_bb")
+        local labels = {}
+        eventual_request("textDocument/completion", pos(2, 7), function(result)
+            for _, item in ipairs(result and (result.items or result) or {}) do
+                labels[item.label] = true
+            end
+            return labels.note ~= nil
         end)
-    end
+        assert.is_true(labels.note)
+    end)
 end)
 
 describe("oelint output parsing", function()

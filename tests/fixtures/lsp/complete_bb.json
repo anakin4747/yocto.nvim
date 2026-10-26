@@ -1,0 +1,1188 @@
+{
+  "user_python": {
+    "initialize": {
+      "capabilities": {
+        "codeActionProvider": true,
+        "completionProvider": {
+          "resolveProvider": true,
+          "triggerCharacters": [
+            ".",
+            "@",
+            "(",
+            "["
+          ]
+        },
+        "declarationProvider": true,
+        "definitionProvider": true,
+        "diagnosticProvider": {
+          "interFileDependencies": true,
+          "workspaceDiagnostics": false
+        },
+        "documentHighlightProvider": true,
+        "documentSymbolProvider": true,
+        "foldingRangeProvider": true,
+        "hoverProvider": true,
+        "implementationProvider": true,
+        "inlayHintProvider": true,
+        "notebookDocumentSync": {
+          "notebookSelector": [
+            {
+              "cells": [
+                {
+                  "language": "python"
+                }
+              ]
+            }
+          ]
+        },
+        "positionEncoding": "utf-8",
+        "referencesProvider": true,
+        "renameProvider": {
+          "prepareProvider": true
+        },
+        "selectionRangeProvider": true,
+        "semanticTokensProvider": {
+          "full": true,
+          "legend": {
+            "tokenModifiers": [
+              "declaration",
+              "definition",
+              "readonly",
+              "static",
+              "deprecated",
+              "abstract",
+              "async",
+              "defaultLibrary"
+            ],
+            "tokenTypes": [
+              "namespace",
+              "type",
+              "class",
+              "enum",
+              "interface",
+              "struct",
+              "typeParameter",
+              "parameter",
+              "variable",
+              "property",
+              "enumMember",
+              "event",
+              "function",
+              "method",
+              "macro",
+              "keyword",
+              "modifier",
+              "comment",
+              "string",
+              "number",
+              "regexp",
+              "operator",
+              "decorator"
+            ]
+          },
+          "range": true
+        },
+        "signatureHelpProvider": {
+          "triggerCharacters": [
+            "(",
+            ",",
+            ")"
+          ]
+        },
+        "textDocumentSync": {
+          "change": 2,
+          "openClose": true
+        },
+        "typeDefinitionProvider": true,
+        "workspace": {
+          "fileOperations": {},
+          "workspaceFolders": {
+            "changeNotifications": true,
+            "supported": true
+          }
+        },
+        "workspaceSymbolProvider": true
+      },
+      "serverInfo": {
+        "name": "zuban",
+        "version": "0.10.1"
+      }
+    },
+    "notifications": [],
+    "requests": {
+      "textDocument/completion {\"position\":{\"character\":7,\"line\":9},\"textDocument\":{\"uri\":\"file://$PROJECT_DIR/$RECIPE_HASH.py\"}}": [
+        {
+          "kind": 3,
+          "label": "note",
+          "sortText": "00000",
+          "textEdit": {
+            "newText": "note",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__annotate__",
+          "sortText": "00001",
+          "textEdit": {
+            "newText": "__annotate__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__annotations__",
+          "sortText": "00002",
+          "textEdit": {
+            "newText": "__annotations__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 10,
+          "label": "__dict__",
+          "sortText": "00003",
+          "textEdit": {
+            "newText": "__dict__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__doc__",
+          "sortText": "00004",
+          "textEdit": {
+            "newText": "__doc__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__file__",
+          "sortText": "00005",
+          "textEdit": {
+            "newText": "__file__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__loader__",
+          "sortText": "00006",
+          "textEdit": {
+            "newText": "__loader__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__name__",
+          "sortText": "00007",
+          "textEdit": {
+            "newText": "__name__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__package__",
+          "sortText": "00008",
+          "textEdit": {
+            "newText": "__package__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        },
+        {
+          "kind": 5,
+          "label": "__spec__",
+          "sortText": "00009",
+          "textEdit": {
+            "newText": "__spec__",
+            "range": {
+              "end": {
+                "character": 7,
+                "line": 9
+              },
+              "start": {
+                "character": 7,
+                "line": 9
+              }
+            }
+          }
+        }
+      ],
+      "textDocument/diagnostic {\"textDocument\":{\"uri\":\"file://$PROJECT_DIR/$RECIPE_HASH.py\"}}": {
+        "items": [
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.build\"",
+            "range": {
+              "end": {
+                "character": 19,
+                "line": 1
+              },
+              "start": {
+                "character": 14,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.compress\"",
+            "range": {
+              "end": {
+                "character": 32,
+                "line": 1
+              },
+              "start": {
+                "character": 24,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.data\"",
+            "range": {
+              "end": {
+                "character": 46,
+                "line": 1
+              },
+              "start": {
+                "character": 42,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.data_smart\"",
+            "range": {
+              "end": {
+                "character": 61,
+                "line": 1
+              },
+              "start": {
+                "character": 51,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.event\"",
+            "range": {
+              "end": {
+                "character": 71,
+                "line": 1
+              },
+              "start": {
+                "character": 66,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.fetch2\"",
+            "range": {
+              "end": {
+                "character": 82,
+                "line": 1
+              },
+              "start": {
+                "character": 76,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.parse\"",
+            "range": {
+              "end": {
+                "character": 92,
+                "line": 1
+              },
+              "start": {
+                "character": 87,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.persist_data\"",
+            "range": {
+              "end": {
+                "character": 109,
+                "line": 1
+              },
+              "start": {
+                "character": 97,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.process\"",
+            "range": {
+              "end": {
+                "character": 121,
+                "line": 1
+              },
+              "start": {
+                "character": 114,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.progress\"",
+            "range": {
+              "end": {
+                "character": 134,
+                "line": 1
+              },
+              "start": {
+                "character": 126,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.runqueue\"",
+            "range": {
+              "end": {
+                "character": 147,
+                "line": 1
+              },
+              "start": {
+                "character": 139,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.siggen\"",
+            "range": {
+              "end": {
+                "character": 158,
+                "line": 1
+              },
+              "start": {
+                "character": 152,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"bb.utils\"",
+            "range": {
+              "end": {
+                "character": 168,
+                "line": 1
+              },
+              "start": {
+                "character": 163,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.data\"",
+            "range": {
+              "end": {
+                "character": 14,
+                "line": 2
+              },
+              "start": {
+                "character": 10,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.path\"",
+            "range": {
+              "end": {
+                "character": 23,
+                "line": 2
+              },
+              "start": {
+                "character": 19,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.utils\"",
+            "range": {
+              "end": {
+                "character": 33,
+                "line": 2
+              },
+              "start": {
+                "character": 28,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.types\"",
+            "range": {
+              "end": {
+                "character": 43,
+                "line": 2
+              },
+              "start": {
+                "character": 38,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.package\"",
+            "range": {
+              "end": {
+                "character": 55,
+                "line": 2
+              },
+              "start": {
+                "character": 48,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.packagegroup\"",
+            "range": {
+              "end": {
+                "character": 72,
+                "line": 2
+              },
+              "start": {
+                "character": 60,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.sstatesig\"",
+            "range": {
+              "end": {
+                "character": 86,
+                "line": 2
+              },
+              "start": {
+                "character": 77,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.lsb\"",
+            "range": {
+              "end": {
+                "character": 94,
+                "line": 2
+              },
+              "start": {
+                "character": 91,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.cachedpath\"",
+            "range": {
+              "end": {
+                "character": 109,
+                "line": 2
+              },
+              "start": {
+                "character": 99,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.license\"",
+            "range": {
+              "end": {
+                "character": 121,
+                "line": 2
+              },
+              "start": {
+                "character": 114,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.qa\"",
+            "range": {
+              "end": {
+                "character": 128,
+                "line": 2
+              },
+              "start": {
+                "character": 126,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.reproducible\"",
+            "range": {
+              "end": {
+                "character": 145,
+                "line": 2
+              },
+              "start": {
+                "character": 133,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.rust\"",
+            "range": {
+              "end": {
+                "character": 154,
+                "line": 2
+              },
+              "start": {
+                "character": 150,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "import-not-found",
+            "message": "Cannot find implementation or library stub for module named \"oe.buildcfg\"",
+            "range": {
+              "end": {
+                "character": 167,
+                "line": 2
+              },
+              "start": {
+                "character": 159,
+                "line": 2
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "attr-defined",
+            "message": "Module has no attribute \"data_smart\"",
+            "range": {
+              "end": {
+                "character": 17,
+                "line": 3
+              },
+              "start": {
+                "character": 4,
+                "line": 3
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          },
+          {
+            "code": "attr-defined",
+            "message": "Module has no attribute \"event\"",
+            "range": {
+              "end": {
+                "character": 12,
+                "line": 4
+              },
+              "start": {
+                "character": 4,
+                "line": 4
+              }
+            },
+            "severity": 1,
+            "source": "zuban"
+          }
+        ],
+        "kind": "full"
+      },
+      "textDocument/semanticTokens/full {\"textDocument\":{\"uri\":\"file://$PROJECT_DIR/$RECIPE_HASH.py\"}}": {
+        "data": [
+          1,
+          7,
+          2,
+          0,
+          3,
+          0,
+          4,
+          2,
+          0,
+          3,
+          0,
+          10,
+          2,
+          0,
+          3,
+          0,
+          18,
+          2,
+          0,
+          3,
+          0,
+          9,
+          2,
+          0,
+          3,
+          0,
+          15,
+          2,
+          0,
+          3,
+          0,
+          10,
+          2,
+          0,
+          3,
+          0,
+          11,
+          2,
+          0,
+          3,
+          0,
+          10,
+          2,
+          0,
+          3,
+          0,
+          17,
+          2,
+          0,
+          3,
+          0,
+          12,
+          2,
+          0,
+          3,
+          0,
+          13,
+          2,
+          0,
+          3,
+          0,
+          13,
+          2,
+          0,
+          3,
+          0,
+          11,
+          2,
+          0,
+          3,
+          1,
+          7,
+          2,
+          0,
+          3,
+          0,
+          9,
+          2,
+          0,
+          3,
+          0,
+          9,
+          2,
+          0,
+          3,
+          0,
+          10,
+          2,
+          0,
+          3,
+          0,
+          10,
+          2,
+          0,
+          3,
+          0,
+          12,
+          2,
+          0,
+          3,
+          0,
+          17,
+          2,
+          0,
+          3,
+          0,
+          14,
+          2,
+          0,
+          3,
+          0,
+          8,
+          2,
+          0,
+          3,
+          0,
+          15,
+          2,
+          0,
+          3,
+          0,
+          12,
+          2,
+          0,
+          3,
+          0,
+          7,
+          2,
+          0,
+          3,
+          0,
+          17,
+          2,
+          0,
+          3,
+          0,
+          9,
+          2,
+          0,
+          3,
+          1,
+          4,
+          2,
+          0,
+          0,
+          1,
+          4,
+          2,
+          0,
+          0,
+          2,
+          7,
+          2,
+          0,
+          3,
+          2,
+          4,
+          6,
+          12,
+          3,
+          1,
+          4,
+          2,
+          0,
+          0,
+          0,
+          3,
+          4,
+          12,
+          0
+        ]
+      },
+      "textDocument/semanticTokens/range {\"range\":{\"end\":{\"character\":0,\"line\":0},\"start\":{\"character\":0,\"line\":0}},\"textDocument\":{\"uri\":\"file://$PROJECT_DIR/$RECIPE_HASH.py\"}}": {
+        "data": []
+      }
+    }
+  },
+  "yocto_bash": {
+    "notifications": [],
+    "requests": []
+  },
+  "yocto_bitbake": {
+    "initialize": {
+      "capabilities": {
+        "completionProvider": {
+          "resolveProvider": true,
+          "triggerCharacters": [
+            ":",
+            "["
+          ]
+        },
+        "definitionProvider": true,
+        "hoverProvider": true,
+        "referencesProvider": true,
+        "renameProvider": {
+          "prepareProvider": true
+        },
+        "semanticTokensProvider": {
+          "full": true,
+          "legend": {
+            "tokenModifiers": [
+              "declaration",
+              "deprecated",
+              "modification",
+              "readonly"
+            ],
+            "tokenTypes": [
+              "function",
+              "variable",
+              "parameter",
+              "class",
+              "number",
+              "operator",
+              "string",
+              "keyword"
+            ]
+          }
+        },
+        "textDocumentSync": 2,
+        "workspace": {
+          "fileOperations": {
+            "didCreate": {
+              "filters": [
+                {
+                  "pattern": {
+                    "glob": "**/*"
+                  },
+                  "scheme": "file"
+                }
+              ]
+            },
+            "didDelete": {
+              "filters": [
+                {
+                  "pattern": {
+                    "glob": "**/*"
+                  },
+                  "scheme": "file"
+                }
+              ]
+            },
+            "didRename": {
+              "filters": [
+                {
+                  "pattern": {
+                    "glob": "**/*"
+                  },
+                  "scheme": "file"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "notifications": [
+      {
+        "after": {
+          "method": "textDocument/didOpen",
+          "n": 1
+        },
+        "method": "bitbake/EmbeddedLanguageDocs",
+        "params": [
+          [
+            {
+              "characterIndexes": [
+                293,
+                294,
+                295,
+                296,
+                297,
+                298,
+                299,
+                300,
+                301,
+                302,
+                303,
+                304,
+                305,
+                306,
+                307,
+                308,
+                309,
+                310,
+                311,
+                312,
+                313,
+                314,
+                315,
+                316,
+                317,
+                318,
+                319,
+                320,
+                321,
+                322,
+                323,
+                324,
+                325,
+                326,
+                327,
+                328,
+                329,
+                330,
+                331,
+                332,
+                333,
+                334,
+                335,
+                336,
+                337,
+                338,
+                339,
+                340,
+                341,
+                342,
+                343,
+                344,
+                345,
+                346,
+                347
+              ],
+              "content": "#!/bin/sh\n\n# Original BitBake document: file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb\n# shellcheck disable=SC2317\n. $ROOT/sources/poky/meta/classes-global/logging.bbclass\n. $ROOT/sources/poky/meta/classes-global/base.bbclass\n               \n                 \n                 \n \n",
+              "language": "bash",
+              "originalUri": "file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb"
+            },
+            {
+              "characterIndexes": [
+                514,
+                515,
+                516,
+                517,
+                518,
+                519,
+                520,
+                521,
+                522,
+                523,
+                524,
+                525,
+                526,
+                527,
+                528,
+                529,
+                530,
+                531,
+                532,
+                533,
+                534,
+                535,
+                533,
+                534,
+                535,
+                536,
+                537,
+                538,
+                539,
+                540,
+                541,
+                542,
+                543,
+                544,
+                545,
+                546,
+                547,
+                548,
+                549,
+                550,
+                551,
+                552,
+                553,
+                554,
+                555,
+                556,
+                557,
+                558,
+                559,
+                560,
+                561,
+                562,
+                563,
+                563,
+                564
+              ],
+              "content": "# Original BitBake document: file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb\nimport bb, bb.build, bb.compress.zstd, bb.data, bb.data_smart, bb.event, bb.fetch2, bb.parse, bb.persist_data, bb.process, bb.progress, bb.runqueue, bb.siggen, bb.utils\nimport oe.data, oe.path, oe.utils, oe.types, oe.package, oe.packagegroup, oe.sstatesig, oe.lsb, oe.cachedpath, oe.license, oe.qa, oe.reproducible, oe.rust, oe.buildcfg\nd = bb.data_smart.DataSmart()\ne = bb.event.Event()\ne.data = d\nimport os\n               \ndef do_foo() :\n    bb.note(\"hi\")\n\n",
+              "language": "python",
+              "originalUri": "file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb"
+            }
+          ]
+        ]
+      },
+      {
+        "after": {
+          "method": "textDocument/didOpen",
+          "n": 1
+        },
+        "method": "textDocument/publishDiagnostics",
+        "params": {
+          "diagnostics": [],
+          "uri": "file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb"
+        }
+      }
+    ],
+    "requests": {
+      "bitbake/requestEmbeddedLanguageDocInfos {\"position\":{\"character\":7,\"line\":2},\"uriString\":\"file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb\"}": "python",
+      "textDocument/semanticTokens/full {\"textDocument\":{\"uri\":\"file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb\"}}": {
+        "data": [
+          0,
+          0,
+          7,
+          1,
+          1,
+          1,
+          7,
+          6,
+          0,
+          1
+        ],
+        "resultId": "1792978269992"
+      }
+    }
+  }
+}
