@@ -1704,6 +1704,15 @@ describe("embedded proxy client", function()
                 }, global_definition({ recipe = INHERITING, foo_uri = foo_uri }))
             end)
 
+            it("finds inherited classes in the layers when the server does not resolve them", function()
+                write_bblayers("build")
+                local foo_uri = write_class("meta-a/classes-recipe", "foo", { "def x(d):" })
+                assert.are.same(
+                    { { uri = foo_uri, range = range(0, 4, 0, 5) } },
+                    global_definition({ recipe = INHERITING })
+                )
+            end)
+
             it("follows inherits of global classes into other layers", function()
                 write_bblayers("build")
                 write_class("meta-a/classes-global", "g", { "inherit h" })

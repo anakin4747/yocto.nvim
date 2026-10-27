@@ -829,11 +829,18 @@ local function search_classes(bitbake, recipe_buf, position, language, callback)
         local roots, layers = {}, configured_layers(bitbake)
         for i = 1, #classes do
             if class_uris[i] then
-                table.insert(roots, class_uris[i])
                 local layer = layer_of(class_uris[i])
                 if not vim.list_contains(layers, layer) then
                     table.insert(layers, layer)
                 end
+            end
+        end
+        -- Classes the server did not resolve are looked up in the layers.
+        for i, class in ipairs(classes) do
+            local path = not class_uris[i] and find_class(layers, class.name)
+            local uri = class_uris[i] or (path and vim.uri_from_fname(path))
+            if uri then
+                table.insert(roots, uri)
             end
         end
         vim.list_extend(roots, global_classes(layers))
