@@ -163,9 +163,13 @@ end
 -- Same default as the vscode-bitbake extension.
 local DEFAULT_BITBAKE_SETTINGS = { pathToBitbakeFolder = "${workspaceFolder}/sources/poky/bitbake" }
 
+-- Entries at the top of a Yocto project. They share one priority so that the
+-- nearest wins over e.g. a .vscode in the home directory.
+local PROJECT_MARKERS = { ".vscode", "sources", "layers", "build" }
+
 -- Top directory of the Yocto project containing path, or nil.
 function M.project_root(path)
-    return vim.fs.root(path, { { ".vscode", "sources", "layers", "build" } })
+    return vim.fs.root(path, { PROJECT_MARKERS })
 end
 
 -- bitbake.* settings from <root>/.vscode/settings.json, accepting both
@@ -251,7 +255,7 @@ local DEFAULT_CONFIGS = {
     yocto_bitbake = {
         cmd = { "language-server-bitbake", "--stdio" },
         filetypes = { "bitbake" },
-        root_markers = { ".vscode", "sources", ".git" },
+        root_markers = { PROJECT_MARKERS, ".git" },
         settings = {},
         before_init = bitbake_before_init,
     },

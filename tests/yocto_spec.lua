@@ -663,6 +663,40 @@ describe("default language server configs", function()
         vim.lsp.config("yocto_bash", { cmd = { "my-bash-ls" } })
         assert.are.same({ "my-bash-ls" }, vim.lsp.config.yocto_bash.cmd)
     end)
+
+    describe("yocto_bitbake root", function()
+        local top
+
+        before_each(function()
+            top = vim.fn.tempname()
+        end)
+
+        after_each(function()
+            vim.fn.delete(top, "rf")
+        end)
+
+        -- Root of the default bitbake config for a recipe of the project at
+        -- top/project, whose parent top has a .vscode, and the dirs in it.
+        local function root(dirs)
+            vim.fn.mkdir(top .. "/.vscode", "p")
+            for _, dir in ipairs(dirs) do
+                vim.fn.mkdir(top .. "/project/" .. dir, "p")
+            end
+            yocto.register_defaults()
+            local recipe = top .. "/project/sources/meta/recipes/foo/foo.bb"
+            return vim.fs.root(recipe, vim.lsp.config.yocto_bitbake.root_markers)
+        end
+
+        for _, marker in ipairs({ "sources", "layers", "build", ".vscode" }) do
+            it("prefers the project's " .. marker .. " over a .vscode above it", function()
+                assert.are.equal(top .. "/project", root({ marker }))
+            end)
+        end
+
+        it("prefers the project over a layer's own git repository", function()
+            assert.are.equal(top .. "/project", root({ "sources", "sources/meta/.git" }))
+        end)
+    end)
 end)
 
 describe("language server selection", function()
