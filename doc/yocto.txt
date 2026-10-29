@@ -1,0 +1,118 @@
+*yocto.txt*  Client side support for the Bitbake language server
+                                                                       *yocto*
+
+A plugin providing the client side logic of vscode-bitbake for Neovim by
+communicating with `language-server-bitbake` and coordinating with Bash and
+Python language servers for the embedded languages in Bitbake files.
+
+    https://github.com/yoctoproject/vscode-bitbake
+
+REQUIREMENTS                                              *yocto-requirements*
+
+- Neovim 0.12+
+- `language-server-bitbake`
+- a bash and a python language server (e.g. `bash-language-server`,
+  `pyright`, `zuban`)
+
+USAGE                                                            *yocto-usage*
+
+Install the plugin. No setup is needed. >lua
+
+    vim.pack.add('https://github.com/anakin4747/yocto.nvim')
+<
+CONFIG                                                          *yocto-config*
+
+Your own |vim.lsp.config()| server configs for `bitbake`, `sh` and `python`
+are used when enabled; otherwise `yocto_bitbake`, `yocto_bash` and
+`yocto_python` fallbacks are started. So any `python` or `sh` server can be
+used.
+
+                                                         *yocto-config-global*
+Customizing is completely optional. The following is equivalent to the
+fallback behaviour of the plugin: >lua
+
+    local server_commands = {
+        sh = { 'bash-language-server', 'start' },
+        bitbake = { 'language-server-bitbake', '--stdio' },
+        python = { 'pyright-langserver', '--stdio' },
+    }
+
+    for filetype, command in pairs(server_commands) do
+        vim.lsp.config(filetype, {
+            root_markers = { '.git' },
+            filetypes = { filetype },
+            cmd = command,
+        })
+        vim.lsp.enable(filetype)
+    end
+<
+                                                        *yocto-config-project*
+This plugin forwards `bitbake.*` settings in `.vscode/settings.json` to
+`language-server-bitbake` and supports finding `bitbake` from
+`bitbake.pathToBitbakeFolder`. So project specific config files for
+vscode-bitbake should also work with this plugin.
+
+NOTE: This plugin never runs `bitbake` so it does not need the settings for
+      specifying the environment to run `bitbake` in.
+
+FEATURES                                                      *yocto-features*
+
+Most features are directly provided by `language-server-bitbake` but this
+plugin communicates with it to also support the embedded languages of Bash
+and Python in Bitbake files in a similar fashion to vscode-bitbake.
+
+Many features are also possible thanks to the `bitbake.vim` runtime
+files: >vim
+
+    :filter /bitbake.vim/ scriptnames
+<
+and setting your |'path'| to recursively search for files with |gf| or
+|gF|: >vim
+
+    :set path+=**
+<
+                                                            *yocto-completion*
+Completion ~
+Partially provided by `language-server-bitbake` but not context aware as this
+plugin will not run `bitbake` to gather build info.
+
+                                                            *yocto-definition*
+Go to definition ~
+- `inherit`, `include`, `require`: provided by |gf| and |gF| with
+  `set path+=**`
+- `file://`: provided by |v_gf| and |v_gF| with `set path+=**`
+- Recipes: partially provided by |gf| and |gF| with `set path+=**` but only
+  for `bb` files without a version in the name (e.g. `recipe.bb` and not
+  `recipe_%.bb`)
+- Python defined in Python files: this plugin forwards from
+  `language-server-bitbake` to your python language server
+- Python defined in Bitbake files: provided by `language-server-bitbake`
+- Bash: this plugin forwards from `language-server-bitbake` to your shell
+  language server
+
+                                                                 *yocto-hover*
+Hover ~
+Provided by `language-server-bitbake` for all Yocto and Bitbake variables and
+keywords. The current value of variables is not shown since this plugin will
+not run `bitbake` to gather build info.
+
+Hover for Python and Bash functions is also provided.
+
+LINTING                                                        *yocto-linting*
+
+Linting is provided via oelint-adv, which is run on bitbake buffers when
+they are opened and written. This used to be provided by the separate
+oelint-adv.nvim plugin but it has been merged into this one.
+
+    https://github.com/priv-kweihmann/oelint-adv
+    https://github.com/anakin4747/oelint-adv.nvim
+
+If you use `bash-language-server` and have `shellcheck` installed then you
+will also get `shellcheck` diagnostics in shell based task definitions.
+
+    https://github.com/bash-lsp/bash-language-server
+    https://github.com/koalaman/shellcheck
+
+Currently no Python linters have been tested.
+
+vim: ft=help spell
