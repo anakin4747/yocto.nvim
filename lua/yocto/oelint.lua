@@ -52,8 +52,9 @@ function M.stop()
 end
 
 -- Lints the file of bufnr and sets its diagnostics once oelint-adv is done.
--- opts.args are extra oelint-adv arguments; opts.force restarts a run in
--- progress. Returns true, or false and the reason it did not start.
+-- Only one run exists at a time: a new run kills the one in progress, even if
+-- it is for another buffer. opts.args are extra oelint-adv arguments.
+-- Returns true, or false and the reason it did not start.
 function M.run(bufnr, opts)
     opts = opts or {}
     if vim.fn.executable(M.cmd) == 0 then
@@ -64,9 +65,6 @@ function M.run(bufnr, opts)
     end
     if vim.bo[bufnr].modified then
         return false, "buffer has unsaved changes"
-    end
-    if job and not opts.force then
-        return false, "oelint-adv is still running"
     end
     M.stop()
 

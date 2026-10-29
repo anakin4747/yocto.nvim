@@ -2758,23 +2758,41 @@ describe("oelint", function()
             )
         end)
 
-        it("refuses to start while a run is in progress", function()
-            executable_mocks["oelint-adv"] = function() end
-            assert.is_true(oelint.run(bufnr))
-            local ok, err = oelint.run(bufnr)
-            assert.is_false(ok)
-            assert.are.equal("oelint-adv is still running", err)
-        end)
-
-        it("restarts a run in progress when forced", function()
+        it("restarts a run in progress", function()
             local finish_first = mock_running_first_run()
             oelint.run(bufnr)
-            assert.is_true(oelint.run(bufnr, { force = true }))
+            assert.is_true(oelint.run(bufnr))
             wait_for_oelint()
             finish_first()
             local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
             assert.are.equal(1, #d)
             assert.are.equal("second", d[1].message)
+        end)
+
+        it("kills the run of another buffer when a new one starts", function()
+            local other_name = vim.fs.joinpath(dir, "bar_1.0.bb")
+            local other = vim.fn.bufadd(other_name)
+            vim.fn.bufload(other)
+            set_filetype(other, "bitbake")
+            oelint.stop()
+            local finish_other
+            executable_mocks["oelint-adv"] = function(_, finish)
+                if not finish_other then
+                    finish_other = finish
+                    return nil
+                end
+                return { code = 0, stdout = "", stderr = name .. ":1:info:a.b:second" }
+            end
+            oelint.run(other)
+            assert.is_true(oelint.run(bufnr))
+            wait_for_oelint()
+            finish_other({ code = 0, signal = 15, stdout = "", stderr = other_name .. ":1:info:a.b:first" })
+            flush_scheduled()
+            assert.are.same({}, vim.diagnostic.get(other, { namespace = oelint.namespace }))
+            local d = vim.diagnostic.get(bufnr, { namespace = oelint.namespace })
+            assert.are.equal(1, #d)
+            assert.are.equal("second", d[1].message)
+            vim.api.nvim_buf_delete(other, { force = true })
         end)
     end)
 

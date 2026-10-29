@@ -27,7 +27,7 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWritePost" }, {
     group = group,
     callback = function(event)
         if vim.bo[event.buf].filetype == "bitbake" then
-            require("yocto.oelint").run(event.buf, { force = true })
+            require("yocto.oelint").run(event.buf)
         end
     end,
 })
