@@ -952,26 +952,6 @@ describe("bitbake file scanning", function()
         end)
     end)
 
-    describe("inherited_classes", function()
-        it("lists every class of an inherit line with its position", function()
-            assert.are.same({
-                { name = "foo", position = pos(1, 8) },
-                { name = "bar-baz", position = pos(1, 13) },
-            }, yocto.inherited_classes({ "X = '1'", "inherit foo  bar-baz" }))
-        end)
-
-        it("lists classes of inherit_defer lines", function()
-            assert.are.same(
-                { { name = "foo", position = pos(0, 14) } },
-                yocto.inherited_classes({ "inherit_defer foo" })
-            )
-        end)
-
-        it("ignores lines that only start with inherit", function()
-            assert.are.same({}, yocto.inherited_classes({ "inherited = 'foo'", "INHERIT += 'foo'" }))
-        end)
-    end)
-
     describe("find_function bash", function()
         it("finds shell function definitions", function()
             assert.are.same({
@@ -998,6 +978,26 @@ describe("bitbake file scanning", function()
 
         it("does not match a longer name", function()
             assert.are.same({}, yocto.find_function({ "foo2() {", "foo-bar() {", "foo_bar() {" }, "foo", "bash"))
+        end)
+    end)
+
+    describe("inherited_classes", function()
+        it("lists every class of an inherit line with its position", function()
+            assert.are.same({
+                { name = "foo", position = pos(1, 8) },
+                { name = "bar-baz", position = pos(1, 13) },
+            }, yocto.inherited_classes({ "X = '1'", "inherit foo  bar-baz" }))
+        end)
+
+        it("lists classes of inherit_defer lines", function()
+            assert.are.same(
+                { { name = "foo", position = pos(0, 14) } },
+                yocto.inherited_classes({ "inherit_defer foo" })
+            )
+        end)
+
+        it("ignores lines that only start with inherit", function()
+            assert.are.same({}, yocto.inherited_classes({ "inherited = 'foo'", "INHERIT += 'foo'" }))
         end)
     end)
 
