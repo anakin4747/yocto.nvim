@@ -919,7 +919,7 @@
                 346,
                 347
               ],
-              "content": "#!/bin/sh\n\n# Original BitBake document: file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb\n# shellcheck disable=SC2317\n. $ROOT/sources/poky/meta/classes-global/logging.bbclass\n. $ROOT/sources/poky/meta/classes-global/base.bbclass\n               \n                 \n                 \n \n",
+              "content": "#!/bin/sh\n\n# Original BitBake document: file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb\n# shellcheck disable=SC2317\n. $ROOT/sources/oe-core/meta/classes-global/logging.bbclass\n. $ROOT/sources/oe-core/meta/classes-global/base.bbclass\n               \n                 \n                 \n \n",
               "language": "bash",
               "originalUri": "file://$ROOT/sources/meta-foo/recipes-foo/foo/foo_1.0.bb"
             },

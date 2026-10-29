@@ -160,9 +160,6 @@ function M.get_info(embedded_uri)
     return infos[embedded_uri]
 end
 
--- Same default as the vscode-bitbake extension.
-local DEFAULT_BITBAKE_SETTINGS = { pathToBitbakeFolder = "${workspaceFolder}/sources/poky/bitbake" }
-
 -- Entries at the top of a Yocto project. They share one priority so that the
 -- nearest wins over e.g. a .vscode in the home directory.
 local PROJECT_MARKERS = { ".vscode", "sources", "layers", "build" }
@@ -200,55 +197,84 @@ local function is_dir(path)
     return vim.fn.isdirectory(path) == 1
 end
 
--- Python import paths of bitbake's `bb` and openembedded-core's `oe` modules
--- for the project at root. pathToBitbakeFolder from the project's
--- .vscode/settings.json wins over the usual poky and oe-core layouts.
+local function expand_workspace(path, root)
+    return vim.fs.normalize((path:gsub("%${workspaceFolder}", root)))
+end
+
+-- Layers listed in <pathToBuildFolder>/conf/bblayers.conf of the project at
+-- root, or {}. The build folder defaults to <root>/build like vscode-bitbake.
+local function project_layers(root, settings)
+    local build = settings.pathToBuildFolder
+    build = expand_workspace(type(build) == "string" and build or "${workspaceFolder}/build", root)
+    local ok, lines = pcall(vim.fn.readfile, build .. "/conf/bblayers.conf")
+    return ok and M.bblayers(lines, build) or {}
+end
+
+-- Whether layer is openembedded-core's meta layer, the one adding the "core"
+-- collection.
+local function is_core_layer(layer)
+    local ok, lines = pcall(vim.fn.readfile, layer .. "/conf/layer.conf")
+    return ok and vim.iter(lines):any(function(line)
+        return line:match("^%s*BBFILE_COLLECTIONS%s*[%?:%+%.]*=%s*[\"'][^\"']*%f[%w_%-]core%f[^%w_%-]") ~= nil
+    end)
+end
+
+-- Bitbake folder of the project at root: pathToBitbakeFolder when set,
+-- otherwise found like oe-init-build-env does, as bitbake/ inside or next to
+-- the checkout of the core layer. Nil when not found.
+local function find_bitbake(root, settings, layers)
+    if type(settings.pathToBitbakeFolder) == "string" then
+        return expand_workspace(settings.pathToBitbakeFolder, root)
+    end
+    local core = vim.iter(layers):find(is_core_layer)
+    if not core then
+        return nil
+    end
+    local checkout = vim.fs.dirname(core)
+    return vim.iter({ checkout, vim.fs.dirname(checkout) })
+        :map(function(dir)
+            return vim.fs.joinpath(dir, "bitbake")
+        end)
+        :find(function(dir)
+            return is_dir(vim.fs.joinpath(dir, "lib", "bb"))
+        end)
+end
+
+-- Python import paths for the project at root: bitbake's lib, holding the bb
+-- module, then the lib of every layer in bblayers.conf, as bitbake adds them
+-- with addpylib. {} when bitbake is not found.
 function M.bitbake_python_paths(root)
     if not root then
         return {}
     end
-    local candidates = {}
-    local configured = read_vscode_bitbake_settings(root).pathToBitbakeFolder
-    if type(configured) == "string" then
-        table.insert(candidates, (configured:gsub("%${workspaceFolder}", root)))
-    end
-    for _, prefix in ipairs({ "sources", "layers", "." }) do
-        table.insert(candidates, vim.fs.joinpath(root, prefix, "poky", "bitbake"))
-        table.insert(candidates, vim.fs.joinpath(root, prefix, "bitbake"))
-    end
-    local bitbake = vim.iter(candidates):find(function(dir)
-        return is_dir(vim.fs.joinpath(dir, "lib", "bb"))
-    end)
-    if not bitbake then
+    local settings = read_vscode_bitbake_settings(root)
+    local layers = project_layers(root, settings)
+    local bitbake = find_bitbake(root, settings, layers)
+    if not bitbake or not is_dir(vim.fs.joinpath(bitbake, "lib", "bb")) then
         return {}
     end
-    bitbake = vim.fs.normalize(bitbake)
-
-    local oe_candidates = { vim.fs.joinpath(vim.fs.dirname(bitbake), "meta", "lib") }
-    for _, prefix in ipairs({ "sources", "layers", "." }) do
-        table.insert(oe_candidates, vim.fs.joinpath(root, prefix, "openembedded-core", "meta", "lib"))
-    end
-    local oe = vim.iter(oe_candidates):find(function(dir)
-        return is_dir(vim.fs.joinpath(dir, "oe"))
-    end)
     local paths = { vim.fs.joinpath(bitbake, "lib") }
-    if oe then
-        table.insert(paths, vim.fs.normalize(oe))
+    for _, layer in ipairs(layers) do
+        local lib = vim.fs.joinpath(layer, "lib")
+        if is_dir(lib) then
+            table.insert(paths, lib)
+        end
     end
     return paths
 end
 
 -- Settings are applied in place: the client shares this settings table and
 -- sends it in workspace/didChangeConfiguration after initialization.
+-- pathToBitbakeFolder defaults to the bitbake of the configured layers.
 local function bitbake_before_init(_, config)
     config.settings = config.settings or {}
     local project = config.root_dir and read_vscode_bitbake_settings(config.root_dir) or {}
-    config.settings.bitbake = vim.tbl_deep_extend(
-        "force",
-        DEFAULT_BITBAKE_SETTINGS,
-        project,
-        config.settings.bitbake or {}
-    )
+    local bitbake = vim.tbl_deep_extend("force", project, config.settings.bitbake or {})
+    local root = config.root_dir and (M.project_root(config.root_dir) or config.root_dir)
+    if bitbake.pathToBitbakeFolder == nil and root then
+        bitbake.pathToBitbakeFolder = find_bitbake(root, bitbake, project_layers(root, bitbake))
+    end
+    config.settings.bitbake = bitbake
 end
 
 local DEFAULT_CONFIGS = {
@@ -743,10 +769,7 @@ local function configured_layers(bitbake)
     if not root then
         return {}
     end
-    local build = vim.tbl_get(bitbake.settings or {}, "bitbake", "pathToBuildFolder") or "${workspaceFolder}/build"
-    build = vim.fs.normalize((build:gsub("%${workspaceFolder}", root)))
-    local ok, lines = pcall(vim.fn.readfile, build .. "/conf/bblayers.conf")
-    return ok and M.bblayers(lines, build) or {}
+    return project_layers(root, vim.tbl_get(bitbake.settings or {}, "bitbake") or {})
 end
 
 -- Uris of the classes in the classes-global directories of layers, which

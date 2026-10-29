@@ -36,15 +36,3 @@ tmux for devshells
 how to record videos at a compressed rate to above post processing to show
 small snippets of features instead of a long demo
 
----
-
-These need to be reviewed as poky is no longer the mega repo that it once was,
-so this plugin shouldn't be searching for poky.
-
-```
-SUCCESS bitbake_python_paths finds poky under sources
-SUCCESS bitbake_python_paths finds separate bitbake and openembedded-core under sources
-SUCCESS bitbake_python_paths finds poky under layers
-SUCCESS bitbake_python_paths finds separate bitbake and openembedded-core under layers
-SUCCESS bitbake_python_paths finds bitbake when the project root is poky itself
-```

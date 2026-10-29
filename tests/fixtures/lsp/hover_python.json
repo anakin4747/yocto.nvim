@@ -1215,7 +1215,7 @@
                 306,
                 307
               ],
-              "content": "#!/bin/sh\n\n# Original BitBake document: file://$ROOT/foo_1.0.bb\n# shellcheck disable=SC2317\n. /sources/poky/meta/classes-global/logging.bbclass\n. /sources/poky/meta/classes-global/base.bbclass\n               \ndo_install() {\n    echo hi\n}\n                 \n             \n               \n \n",
+              "content": "#!/bin/sh\n\n# Original BitBake document: file://$ROOT/foo_1.0.bb\n# shellcheck disable=SC2317\n. /sources/oe-core/meta/classes-global/logging.bbclass\n. /sources/oe-core/meta/classes-global/base.bbclass\n               \ndo_install() {\n    echo hi\n}\n                 \n             \n               \n \n",
               "language": "bash",
               "originalUri": "file://$ROOT/foo_1.0.bb"
             },

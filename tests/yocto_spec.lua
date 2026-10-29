@@ -1093,10 +1093,10 @@ describe("bitbake file scanning", function()
 
     describe("bblayers", function()
         it("lists the layers of a multi-line BBLAYERS with TOPDIR expanded", function()
-            assert.are.same({ "/p/sources/poky/meta", "/abs/meta-x" }, yocto.bblayers({
+            assert.are.same({ "/p/sources/oe-core/meta", "/abs/meta-x" }, yocto.bblayers({
                 "# comment",
                 'BBLAYERS ?= " \\',
-                "  ${TOPDIR}/../sources/poky/meta \\",
+                "  ${TOPDIR}/../sources/oe-core/meta \\",
                 "  /abs/meta-x \\",
                 '  "',
             }, "/p/build"))
@@ -2151,19 +2151,27 @@ describe("bitbake project settings", function()
         )
     end)
 
-    it("defaults pathToBitbakeFolder like the vscode extension", function()
+    it("defaults pathToBitbakeFolder to the bitbake of the configured layers", function()
+        write("sources/oe-core/meta/conf/layer.conf", { 'BBFILE_COLLECTIONS += "core"' })
+        write("sources/bitbake/lib/bb/__init__.py")
+        write("build/conf/bblayers.conf", { 'BBLAYERS ?= "${TOPDIR}/../sources/oe-core/meta"' })
         open_recipe()
         assert.are.equal(
-            "${workspaceFolder}/sources/poky/bitbake",
+            vim.fs.joinpath(root, "sources/bitbake"),
             sent("workspace/didChangeConfiguration").settings.bitbake.pathToBitbakeFolder
         )
+    end)
+
+    it("sends no pathToBitbakeFolder when bitbake is not found", function()
+        open_recipe()
+        assert.is_nil(sent("workspace/didChangeConfiguration").settings.bitbake.pathToBitbakeFolder)
     end)
 
     it("sends bitbake settings from the project .vscode/settings.json", function()
         write(".vscode/settings.json", {
             "{",
             "  // comments and trailing commas are allowed by vscode",
-            '  "bitbake.pathToBitbakeFolder": "${workspaceFolder}/poky/bitbake",',
+            '  "bitbake.pathToBitbakeFolder": "${workspaceFolder}/tools/bitbake",',
             '  "bitbake.loggingLevel": "debug",',
             '  "editor.tabSize": 4,',
             "}",
@@ -2171,7 +2179,7 @@ describe("bitbake project settings", function()
         open_recipe()
         local settings = sent("workspace/didChangeConfiguration").settings
         assert.are.same({
-            pathToBitbakeFolder = "${workspaceFolder}/poky/bitbake",
+            pathToBitbakeFolder = "${workspaceFolder}/tools/bitbake",
             loggingLevel = "debug",
         }, settings.bitbake)
         assert.is_nil(settings.editor)
@@ -2189,10 +2197,7 @@ describe("bitbake project settings", function()
     it("ignores an invalid .vscode/settings.json", function()
         write(".vscode/settings.json", { "{ not json" })
         open_recipe()
-        assert.are.equal(
-            "${workspaceFolder}/sources/poky/bitbake",
-            sent("workspace/didChangeConfiguration").settings.bitbake.pathToBitbakeFolder
-        )
+        assert.are.same({}, sent("workspace/didChangeConfiguration").settings.bitbake)
     end)
 
     it("keeps settings from vim.lsp.config over the project file", function()
@@ -2227,9 +2232,9 @@ describe("project_root", function()
 
     it("uses the nearest directory containing any marker", function()
         vim.fn.mkdir(vim.fs.joinpath(root, "sources"), "p")
-        vim.fn.mkdir(vim.fs.joinpath(root, "poky", "build"), "p")
-        local recipe = write("poky/meta/recipes-foo/foo/foo_1.0.bb")
-        assert.are.equal(vim.fs.joinpath(root, "poky"), yocto.project_root(recipe))
+        vim.fn.mkdir(vim.fs.joinpath(root, "checkout", "build"), "p")
+        local recipe = write("checkout/meta/recipes-foo/foo/foo_1.0.bb")
+        assert.are.equal(vim.fs.joinpath(root, "checkout"), yocto.project_root(recipe))
     end)
 
     it("returns nil outside a project", function()
@@ -2244,8 +2249,13 @@ describe("bitbake_python_paths", function()
         write(dir .. "/lib/bb/__init__.py")
     end
 
-    local function oe_at(dir)
+    local function core_at(dir)
+        write(dir .. "/conf/layer.conf", { 'BBFILE_COLLECTIONS += "core"' })
         write(dir .. "/lib/oe/__init__.py")
+    end
+
+    local function bblayers(layers, build)
+        write((build or "build") .. "/conf/bblayers.conf", { 'BBLAYERS ?= "' .. table.concat(layers, " ") .. '"' })
     end
 
     local function abs(relpath)
@@ -2260,49 +2270,93 @@ describe("bitbake_python_paths", function()
         vim.fn.delete(root, "rf")
     end)
 
-    for _, prefix in ipairs({ "sources", "layers" }) do
-        it("finds poky under " .. prefix, function()
-            bitbake_at(prefix .. "/poky/bitbake")
-            oe_at(prefix .. "/poky/meta")
-            assert.are.same(
-                { abs(prefix .. "/poky/bitbake/lib"), abs(prefix .. "/poky/meta/lib") },
-                yocto.bitbake_python_paths(root)
-            )
-        end)
+    it("finds bitbake next to the core layer's checkout", function()
+        core_at("sources/oe-core/meta")
+        bitbake_at("sources/bitbake")
+        bblayers({ "${TOPDIR}/../sources/oe-core/meta" })
+        assert.are.same(
+            { abs("sources/bitbake/lib"), abs("sources/oe-core/meta/lib") },
+            yocto.bitbake_python_paths(root)
+        )
+    end)
 
-        it("finds separate bitbake and openembedded-core under " .. prefix, function()
-            bitbake_at(prefix .. "/bitbake")
-            oe_at(prefix .. "/openembedded-core/meta")
-            assert.are.same(
-                { abs(prefix .. "/bitbake/lib"), abs(prefix .. "/openembedded-core/meta/lib") },
-                yocto.bitbake_python_paths(root)
-            )
-        end)
-    end
+    it("finds bitbake inside the core layer's checkout", function()
+        core_at("sources/combined/meta")
+        bitbake_at("sources/combined/bitbake")
+        bblayers({ "${TOPDIR}/../sources/combined/meta" })
+        assert.are.same(
+            { abs("sources/combined/bitbake/lib"), abs("sources/combined/meta/lib") },
+            yocto.bitbake_python_paths(root)
+        )
+    end)
 
-    it("finds bitbake when the project root is poky itself", function()
-        bitbake_at("bitbake")
-        oe_at("meta")
-        assert.are.same({ abs("bitbake/lib"), abs("meta/lib") }, yocto.bitbake_python_paths(root))
+    it("includes the lib directory of every layer", function()
+        core_at("sources/oe-core/meta")
+        bitbake_at("sources/bitbake")
+        write("sources/meta-arm/meta-arm/lib/arm/__init__.py")
+        write("sources/meta-foo/conf/layer.conf")
+        bblayers({
+            "${TOPDIR}/../sources/oe-core/meta",
+            "${TOPDIR}/../sources/meta-arm/meta-arm",
+            "${TOPDIR}/../sources/meta-foo",
+        })
+        assert.are.same({
+            abs("sources/bitbake/lib"),
+            abs("sources/oe-core/meta/lib"),
+            abs("sources/meta-arm/meta-arm/lib"),
+        }, yocto.bitbake_python_paths(root))
+    end)
+
+    it("finds layers outside the project", function()
+        local elsewhere, write_elsewhere = temp_tree()
+        write_elsewhere("oe/meta/conf/layer.conf", { 'BBFILE_COLLECTIONS += "core"' })
+        write_elsewhere("oe/meta/lib/oe/__init__.py")
+        write_elsewhere("bitbake/lib/bb/__init__.py")
+        bblayers({ vim.fs.joinpath(elsewhere, "oe/meta") })
+        local paths = yocto.bitbake_python_paths(root)
+        vim.fn.delete(elsewhere, "rf")
+        assert.are.same({
+            vim.fs.joinpath(elsewhere, "bitbake/lib"),
+            vim.fs.joinpath(elsewhere, "oe/meta/lib"),
+        }, paths)
+    end)
+
+    it("uses pathToBuildFolder from .vscode/settings.json", function()
+        core_at("sources/oe-core/meta")
+        bitbake_at("sources/bitbake")
+        bblayers({ "${TOPDIR}/../sources/oe-core/meta" }, "build-qemu")
+        write(".vscode/settings.json", {
+            '{ "bitbake.pathToBuildFolder": "${workspaceFolder}/build-qemu" }',
+        })
+        assert.are.same(
+            { abs("sources/bitbake/lib"), abs("sources/oe-core/meta/lib") },
+            yocto.bitbake_python_paths(root)
+        )
     end)
 
     it("uses pathToBitbakeFolder from .vscode/settings.json", function()
-        bitbake_at("sources/poky/bitbake")
+        core_at("sources/oe-core/meta")
+        bitbake_at("sources/bitbake")
         bitbake_at("tools/bitbake")
-        oe_at("tools/meta")
+        bblayers({ "${TOPDIR}/../sources/oe-core/meta" })
         write(".vscode/settings.json", {
             '{ "bitbake.pathToBitbakeFolder": "${workspaceFolder}/tools/bitbake" }',
         })
-        assert.are.same({ abs("tools/bitbake/lib"), abs("tools/meta/lib") }, yocto.bitbake_python_paths(root))
+        assert.are.same(
+            { abs("tools/bitbake/lib"), abs("sources/oe-core/meta/lib") },
+            yocto.bitbake_python_paths(root)
+        )
     end)
 
-    it("returns only bitbake when oe is not found", function()
-        bitbake_at("sources/poky/bitbake")
-        assert.are.same({ abs("sources/poky/bitbake/lib") }, yocto.bitbake_python_paths(root))
+    it("returns nothing without a bblayers.conf", function()
+        core_at("sources/oe-core/meta")
+        bitbake_at("sources/bitbake")
+        assert.are.same({}, yocto.bitbake_python_paths(root))
     end)
 
     it("returns nothing when bitbake is not found", function()
-        oe_at("sources/poky/meta")
+        core_at("sources/oe-core/meta")
+        bblayers({ "${TOPDIR}/../sources/oe-core/meta" })
         assert.are.same({}, yocto.bitbake_python_paths(root))
     end)
 
@@ -2356,15 +2410,17 @@ describe("embedded python servers", function()
     local root, write, messages
 
     local function setup_project(name)
-        write(name .. "/sources/poky/bitbake/lib/bb/__init__.py")
-        write(name .. "/sources/poky/meta/lib/oe/__init__.py")
+        write(name .. "/sources/bitbake/lib/bb/__init__.py")
+        write(name .. "/sources/oe-core/meta/conf/layer.conf", { 'BBFILE_COLLECTIONS += "core"' })
+        write(name .. "/sources/oe-core/meta/lib/oe/__init__.py")
+        write(name .. "/build/conf/bblayers.conf", { 'BBLAYERS ?= "${TOPDIR}/../sources/oe-core/meta"' })
         return vim.uri_from_fname(write(name .. "/sources/meta-foo/recipes-foo/foo/foo_1.0.bb"))
     end
 
     local function python_paths(name)
         return {
-            vim.fs.joinpath(root, name, "sources/poky/bitbake/lib"),
-            vim.fs.joinpath(root, name, "sources/poky/meta/lib"),
+            vim.fs.joinpath(root, name, "sources/bitbake/lib"),
+            vim.fs.joinpath(root, name, "sources/oe-core/meta/lib"),
         }
     end
 
@@ -2533,11 +2589,13 @@ describe("python servers find bitbake modules of the project", function()
     before_each(function()
         yocto.storage_dir = vim.fn.tempname()
         root, write = temp_tree()
-        write("sources/poky/bitbake/lib/bb/__init__.py", {
+        write("sources/bitbake/lib/bb/__init__.py", {
             "def note(msg):",
             '    """yocto test doc"""',
         })
-        write("sources/poky/meta/lib/oe/__init__.py")
+        write("sources/oe-core/meta/conf/layer.conf", { 'BBFILE_COLLECTIONS += "core"' })
+        write("sources/oe-core/meta/lib/oe/__init__.py")
+        write("build/conf/bblayers.conf", { 'BBLAYERS ?= "${TOPDIR}/../sources/oe-core/meta"' })
         local path = write("sources/meta-foo/recipes-foo/foo/foo_1.0.bb", {
             'SUMMARY = "foo"',
             "python do_foo() {",
@@ -2575,7 +2633,7 @@ describe("python servers find bitbake modules of the project", function()
             target = location and (location.uri or location.targetUri)
             return target ~= nil
         end)
-        assert.are.equal(vim.uri_from_fname(vim.fs.joinpath(root, "sources/poky/bitbake/lib/bb/__init__.py")), target)
+        assert.are.equal(vim.uri_from_fname(vim.fs.joinpath(root, "sources/bitbake/lib/bb/__init__.py")), target)
     end)
 
     it("completes bb members", function()
