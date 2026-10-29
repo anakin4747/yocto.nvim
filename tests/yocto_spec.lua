@@ -500,7 +500,7 @@ local function restore_servers()
     register_fake_defaults()
 end
 
-describe("embedded language docs handler", function()
+describe("embedded language handler", function()
     local dir
 
     before_each(function()
@@ -623,7 +623,6 @@ describe("embedded language docs handler", function()
         yocto.handler({ code = -32603, message = "boom" }, { doc("bash", "a") }, {})
         assert.is_nil(yocto.get_embedded_uri(ORIG, "bash"))
     end)
-
 end)
 
 describe("default language server configs", function()
