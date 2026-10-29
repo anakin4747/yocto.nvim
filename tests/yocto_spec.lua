@@ -986,6 +986,19 @@ describe("bitbake file scanning", function()
             assert.are.same({}, yocto.find_function({ "python foo () {", "def foo(d):" }, "foo", "bash"))
             assert.are.same({}, yocto.find_function({ "foo() {" }, "foo", "python"))
         end)
+
+        it("finds a definition after other lines", function()
+            local lines = { "X = '1'", "foo() {", "}" }
+            assert.are.same({ range(1, 0, 1, 3) }, yocto.find_function(lines, "foo", "bash"))
+        end)
+
+        it("returns nothing when the function is absent", function()
+            assert.are.same({}, yocto.find_function({ "bar() {" }, "foo", "bash"))
+        end)
+
+        it("does not match a longer name", function()
+            assert.are.same({}, yocto.find_function({ "foo2() {", "foo-bar() {", "foo_bar() {" }, "foo", "bash"))
+        end)
     end)
 
     describe("function_doc bash", function()
