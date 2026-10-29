@@ -279,13 +279,10 @@ end
 -- Enable the fallback config for filetype unless the user enabled one.
 function M.select_server(filetype)
     local default = DEFAULT_FOR_FILETYPE[filetype]
-    if not default then
-        return
-    end
+    if not default then return end
+
     for _, config in ipairs(vim.lsp.get_configs({ enabled = true, filetype = filetype })) do
-        if config.name ~= default then
-            return
-        end
+        if config.name ~= default then return end
     end
     vim.lsp.enable(default)
 end
@@ -318,9 +315,7 @@ end
 -- Original document position -> embedded document position; nil if unmapped.
 function M.to_embedded_position(character_indexes, original_lines, embedded_lines, pos)
     local embedded_offset = character_indexes[M.position_to_offset(original_lines, pos) + 1]
-    if not embedded_offset then
-        return nil
-    end
+    if not embedded_offset then return nil end
     return M.offset_to_position(embedded_lines, embedded_offset)
 end
 
